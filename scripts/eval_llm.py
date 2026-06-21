@@ -111,28 +111,29 @@ def _report_game(i, llm_seat, opponent, result, fallback_moves, tally) -> None:
 
 
 def eval_vs(opponent: str, n_games: int, model: str, effort: str,
-            concurrency: int, verbose: bool) -> None:
+            concurrency: int, verbose: bool, start: int = 0) -> None:
     _say(f"\n=== LLM ({model}, effort={effort}) vs {opponent} — "
-         f"{n_games} games, concurrency={concurrency} ===")
+         f"games {start}..{start + n_games - 1}, concurrency={concurrency} ===")
     tally = {"llm": 0, "opp": 0, "ties": 0, "fb_games": 0, "done": 0, "n": n_games}
+    game_indices = range(start, start + n_games)
 
     def run_game(i):
         llm = LLMAgent(model=model, effort=effort, top_k=TOP_K, verbose=verbose)
         opp = make_opponent(opponent, seed=1000 + i)
-        llm_seat = i % 2  # alternate seats
+        llm_seat = i % 2  # alternate seats (by absolute game index)
         result, fb = play_one_game(
             llm, opponent, opp, llm_seat, i, progress=(concurrency == 1)
         )
         return i, llm_seat, result, fb
 
     if concurrency == 1:
-        for i in range(n_games):
+        for i in game_indices:
             i, llm_seat, result, fb = run_game(i)
             _report_game(i, llm_seat, opponent, result, fb, tally)
     else:
         _say(f"  launching {n_games} games, up to {concurrency} at a time...")
         with ThreadPoolExecutor(max_workers=concurrency) as ex:
-            futures = [ex.submit(run_game, i) for i in range(n_games)]
+            futures = [ex.submit(run_game, i) for i in game_indices]
             for fut in as_completed(futures):
                 i, llm_seat, result, fb = fut.result()
                 _report_game(i, llm_seat, opponent, result, fb, tally)
@@ -159,6 +160,9 @@ def main(argv=None) -> None:
     parser.add_argument("--top-k", type=int, default=12,
                         help="show the LLM only the top-k moves ranked by the "
                         "Greedy evaluator (hybrid mode). 0 = show all moves.")
+    parser.add_argument("--start", type=int, default=0,
+                        help="first game index (offsets seeds + seat alternation "
+                        "so batches cover distinct games)")
     parser.add_argument("--concurrency", type=int, default=1,
                         help="games to run in parallel (independent games; "
                         "calls are network-bound so this ~N-x's throughput). "
@@ -177,7 +181,7 @@ def main(argv=None) -> None:
     opponents = ["greedy", "mcts"] if args.opponent == "both" else [args.opponent]
     for opp in opponents:
         eval_vs(opp, args.games, args.model, args.effort,
-                args.concurrency, args.verbose)
+                args.concurrency, args.verbose, start=args.start)
 
 
 if __name__ == "__main__":
