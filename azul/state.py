@@ -255,7 +255,35 @@ class GameState:
 
     def refill_factories(self, rng) -> None:
         """Draw 4 tiles per factory from bag; reshuffle discard into bag if needed."""
-        raise NotImplementedError
+        self.center = {}
+        self.first_player_marker_in_center = True
+
+        for factory in self.factories:
+            factory.clear()
+            for _ in range(4):
+                if sum(self.bag.values()) == 0:
+                    if sum(self.discard.values()) == 0:
+                        break
+                    # Reshuffle discard into bag
+                    self.bag = dict(self.discard)
+                    self.discard = {c: 0 for c in Color}
+                tile = self._draw_from_bag(rng)
+                if tile is None:
+                    break
+                factory[tile] = factory.get(tile, 0) + 1
+
+    def _draw_from_bag(self, rng) -> Optional[Color]:
+        """Draw one tile at random from the bag. Returns None if bag is empty."""
+        total = sum(self.bag.values())
+        if total == 0:
+            return None
+        idx = rng.randrange(total)
+        for color in Color:
+            if idx < self.bag[color]:
+                self.bag[color] -= 1
+                return color
+            idx -= self.bag[color]
+        return None  # unreachable
 
     def encode(self):
         """Return a compact numeric representation (Phase 4+)."""
