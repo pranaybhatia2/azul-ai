@@ -20,7 +20,7 @@ import random
 
 from azul.agent import GreedyAgent
 from azul.game import Game
-from azul.llm_agent import LLMAgent
+from azul.llm_agent import DEFAULT_EFFORT, DEFAULT_MODEL, LLMAgent
 
 
 def make_opponent(name: str, seed: int):
@@ -36,13 +36,15 @@ def make_opponent(name: str, seed: int):
     raise ValueError(name)
 
 
-def eval_vs(opponent: str, n_games: int, model: str, verbose: bool) -> None:
-    print(f"\n=== LLM ({model}) vs {opponent} — {n_games} games ===")
+def eval_vs(opponent: str, n_games: int, model: str, effort: str,
+            verbose: bool) -> None:
+    print(f"\n=== LLM ({model}, effort={effort}) vs {opponent} — "
+          f"{n_games} games ===")
     llm_wins = opp_wins = ties = 0
     fallbacks = 0
 
     for i in range(n_games):
-        llm = LLMAgent(model=model, verbose=verbose)
+        llm = LLMAgent(model=model, effort=effort, verbose=verbose)
         opp = make_opponent(opponent, seed=1000 + i)
         # Alternate seats: LLM is Player 0 on even games, Player 1 on odd.
         llm_seat = i % 2
@@ -84,7 +86,9 @@ def main(argv=None) -> None:
     parser.add_argument("--games", type=int, default=4)
     parser.add_argument("--opponent", choices=["greedy", "mcts", "both"],
                         default="greedy")
-    parser.add_argument("--model", default="claude-opus-4-8")
+    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--effort", default=DEFAULT_EFFORT,
+                        choices=["low", "medium", "high", "max"])
     parser.add_argument("--mcts-iterations", type=int, default=200)
     parser.add_argument("--verbose", action="store_true",
                         help="print the model's reply each turn")
@@ -98,7 +102,7 @@ def main(argv=None) -> None:
 
     opponents = ["greedy", "mcts"] if args.opponent == "both" else [args.opponent]
     for opp in opponents:
-        eval_vs(opp, args.games, args.model, args.verbose)
+        eval_vs(opp, args.games, args.model, args.effort, args.verbose)
 
 
 if __name__ == "__main__":
