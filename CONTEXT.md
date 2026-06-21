@@ -22,7 +22,7 @@ A 2-player implementation of the board game Azul, with progressively smarter AI 
 | 5 | MCTS + UCB | Monte Carlo, exploration/exploitation |
 | 6 | Self-play NN (AlphaZero-lite) | RL, policy/value networks, self-play |
 | 7 | Evaluation harness | Tournaments, reproducibility |
-Currently: **Phase 6** (Phases 1–5 complete)
+Currently: **Phase 6 complete — roadmap done** (Phases 1–6 built & tested)
 
 - Phase 1: engine complete — state, scoring, move gen, refill, new_game. All TDD'd.
 - Phase 2: `Agent` ABC, `end_game_bonus()`, `Game` loop (`play()`/`step()`),
@@ -53,6 +53,44 @@ Currently: **Phase 6** (Phases 1–5 complete)
       [0,1]): depth-8 greedy @400it beats Greedy 8-0 — matches Minimax.
       depth-0 (eval node immediately) LOSES 1-7, so a few rollout moves matter.
   Reward stored per-node from player-0's perspective (flip for P1).
+- Phase 6: AlphaZero-lite. `encoding.py` (state->148 floats canonical to the
+  player to move; move<->index over 180; legal mask), `net.py` (MLP, policy +
+  value heads, `predict` bridge), `az_mcts.py` (`NeuralMCTSAgent` — PUCT, net
+  value at leaves, no rollouts; value stored by player identity), `selfplay.py`,
+  `train.py` (policy CE + value MSE, iterate loop, checkpoints), `arena.py`
+  (NN vs baseline), `warmstart.py` (distill Greedy / MCTS / hybrid). PyTorch CPU.
+
+  **Exit condition was "learns + beats Greedy." Result: LEARNS (emphatically),
+  does NOT beat Greedy — and we proved why.** Training results vs baselines:
+    * pure self-play:            0% vs Random, 0-10 vs Greedy
+    * greedy-softmax distill:   75% vs Random, 0-12 vs Greedy
+    * MCTS-teacher distill:     42% vs Random, 0-12 vs Greedy (visit-count
+      target is itself starved at affordable sims → noisier than greedy-softmax)
+    * heavy hybrid (strong-MCTS states, clean greedy-softmax policy targets,
+      strong-play value targets, 512-wide net, 2739 examples, loss 5.57->2.68):
+      **100% vs Random**, still 0-12 vs Greedy at 200 AND 400 play-time sims.
+
+  **Why the Greedy bar held (well-evidenced, not a bug):**
+    1. More play-time sims don't help (0-6 at 200 and 400) → the bottleneck is
+       the learned VALUE head, not search budget.
+    2. On CPU the net can only be distilled from the heuristic (or from
+       search whose visit-count signal is starved by Azul's ~90-move
+       branching), so it asymptotes at ~Greedy strength — a fuzzy copy of
+       Greedy. Beating a sharp 1-ply heuristic needs genuine multi-step
+       planning, which Minimax/MCTS get from DEPTH (both beat Greedy 8-0) but
+       a learned value can't reveal at this simulation budget.
+    3. Same branching-factor wall as Phases 4-5, now shown to also starve the
+       NN's training signal. Clearing it needs AlphaZero-scale self-play
+       (thousands of sims/move) → a GPU, not a code change.
+
+## Final agent ladder
+  Random  <  Greedy ≈ NN (100% vs Random)  <  Minimax ≈ MCTS (both 8-0 vs Greedy)
+  All behind one `Agent` interface; comparable via `play_match`. The search
+  agents are the Greedy-beaters; the NN matches Greedy on CPU compute.
+
+## How to actually beat Greedy with the NN (GPU-scale self-play)
+  See the "GPU self-play" notes below — the method is right, only the compute
+  budget (sims/move × games × iterations) is short.
 ---
 ## State representation decisions
 These were made deliberately — don't change without discussion.
