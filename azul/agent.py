@@ -38,7 +38,9 @@ class HumanAgent(Agent):
     without real stdin/stdout.
     """
 
-    def __init__(self, input_fn=input, output_fn=print):
+    def __init__(self, input_fn=None, output_fn=None):
+        # Resolved lazily at call time (see choose_move) so that tests which
+        # monkeypatch builtins.input/print take effect.
         self._input = input_fn
         self._output = output_fn
 
@@ -46,19 +48,22 @@ class HumanAgent(Agent):
         # Imported here to avoid a hard dependency for headless agents.
         from azul.render import render, render_move
 
+        inp = self._input if self._input is not None else input
+        out = self._output if self._output is not None else print
+
         moves = state.legal_moves()
-        self._output(render(state))
-        self._output("Legal moves:")
+        out(render(state))
+        out("Legal moves:")
         for i, m in enumerate(moves):
-            self._output(f"  [{i}] {render_move(m)}")
+            out(f"  [{i}] {render_move(m)}")
 
         while True:
-            raw = self._input(f"Choose a move [0-{len(moves) - 1}]: ")
+            raw = inp(f"Choose a move [0-{len(moves) - 1}]: ")
             try:
                 idx = int(raw)
             except (ValueError, TypeError):
-                self._output("Please enter a number.")
+                out("Please enter a number.")
                 continue
             if 0 <= idx < len(moves):
                 return moves[idx]
-            self._output("Out of range.")
+            out("Out of range.")
