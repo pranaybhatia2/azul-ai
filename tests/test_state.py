@@ -124,7 +124,3 @@ def test_stub_raises(method, args):
     with pytest.raises(NotImplementedError):
         getattr(gs, method)(*args)
 
-def test_apply_stub_raises():
-    gs = GameState()
-    with pytest.raises(NotImplementedError):
-        gs.apply(Move(0, Color.BLUE, 0))

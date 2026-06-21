@@ -96,6 +96,7 @@ class GameState:
     )
     current_player: int = 0
     round_number: int = 1
+    first_player_marker_in_center: bool = False
 
     # ------------------------------------------------------------------
     # Infrastructure (implemented)
@@ -179,8 +180,39 @@ class GameState:
         )
 
     def apply(self, move: Move) -> None:
-        """Apply move in place. Mutates self."""
-        raise NotImplementedError
+        """Apply move in place. Mutates self. Trusts caller for legality."""
+        board = self.player_boards[self.current_player]
+
+        # --- Take tiles from source ---
+        if move.source == CENTER:
+            count = self.center.pop(move.color, 0)
+            if self.first_player_marker_in_center:
+                board.has_first_player_marker = True
+                board.floor_count += 1
+                self.first_player_marker_in_center = False
+        else:
+            factory = self.factories[move.source]
+            count = factory.pop(move.color, 0)
+            # Leftovers go to center
+            for color, n in factory.items():
+                if n:
+                    self.center[color] = self.center.get(color, 0) + n
+            factory.clear()
+
+        # --- Place tiles ---
+        if move.dest_line == FLOOR:
+            board.floor_count += count
+        else:
+            pl = board.pattern_lines[move.dest_line]
+            capacity = PATTERN_LINE_CAPACITY[move.dest_line]
+            space = capacity - pl.count
+            pl.color = move.color
+            pl.count += min(count, space)
+            overflow = count - space
+            if overflow > 0:
+                board.floor_count += overflow
+
+        self.current_player = 1 - self.current_player
 
     def legal_moves(self) -> list[Move]:
         """Return all legal moves for the current player."""
