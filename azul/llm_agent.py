@@ -276,6 +276,42 @@ def _move_annotation(state: GameState, board, move: Move) -> str:
     )
 
 
+def rank_moves(state: GameState, k: Optional[int] = None):
+    """Score every legal move the way GreedyAgent does — apply it to a clone and
+    evaluate() the result for the mover — and return [(move, score), ...] sorted
+    best-first. Truncated to the top k if given."""
+    from azul.heuristics import evaluate
+
+    me = state.current_player
+    scored = []
+    for move in state.legal_moves():
+        nxt = state.clone()
+        nxt.apply(move)
+        scored.append((move, evaluate(nxt, me)))
+    scored.sort(key=lambda ms: ms[1], reverse=True)
+    return scored if k is None else scored[:k]
+
+
+def describe_candidate_moves(state: GameState, scored: list) -> str:
+    """Render a pre-ranked candidate set (move, eval-score) with annotations.
+    The eval score is GreedyAgent's one-ply tactical estimate — useful but
+    myopic, which the header tells the model so it doesn't blindly take rank 1."""
+    board = state.player_boards[state.current_player]
+    lines = [
+        "CANDIDATE MOVES — pre-ranked by a one-ply tactical evaluator (higher "
+        "eval = stronger immediate position for you). That score is MYOPIC: it "
+        "barely credits multi-round setups, so when scores are close prefer the "
+        "move that best builds toward a column/color bonus rather than just "
+        "taking rank 1. Choose exactly one code:",
+    ]
+    for rank, (move, score) in enumerate(scored, 1):
+        lines.append(
+            f"  {rank}. {move_to_shortcut(move)} (eval {score:.1f})  — "
+            f"{render_move(move)}  [{_move_annotation(state, board, move)}]"
+        )
+    return "\n".join(lines)
+
+
 def describe_legal_moves(state: GameState, moves: list[Move]) -> str:
     """List every legal move with its shortcut code, a readable description, and
     a computed annotation of its consequence (see _move_annotation)."""
@@ -319,6 +355,7 @@ class LLMAgent(Agent):
         *,
         model: str = DEFAULT_MODEL,
         effort: str = DEFAULT_EFFORT,
+        top_k: Optional[int] = 12,
         client=None,
         complete: Optional[CompleteFn] = None,
         max_move_retries: int = 2,
@@ -329,6 +366,9 @@ class LLMAgent(Agent):
         """Args:
         model: Claude model id (default Sonnet 4.6).
         effort: output_config effort — "low" (default) | "medium" | "high" | "max".
+        top_k: show only the top-k moves ranked by the Greedy evaluator (hybrid
+            mode — tactically vetted candidates + LLM judgment). None = show all
+            legal moves annotated (no ranking).
         client: an anthropic.Anthropic instance; created lazily if omitted.
         complete: override the network call entirely — (system, messages) -> text.
             Used by tests so no API key or network is needed.
@@ -339,6 +379,7 @@ class LLMAgent(Agent):
         """
         self.model = model
         self.effort = effort
+        self.top_k = top_k
         self._client = client
         self._complete = complete
         self.max_move_retries = max_move_retries
@@ -376,10 +417,11 @@ class LLMAgent(Agent):
         self.used_fallback = False
 
         complete = self._complete or self._default_complete
-        user = (
-            f"{describe_state(state)}\n\n{describe_legal_moves(state, moves)}\n\n"
-            "Choose your move."
-        )
+        if self.top_k is not None:
+            moves_text = describe_candidate_moves(state, rank_moves(state, self.top_k))
+        else:
+            moves_text = describe_legal_moves(state, moves)
+        user = f"{describe_state(state)}\n\n{moves_text}\n\nChoose your move."
         messages: list[dict] = [{"role": "user", "content": user}]
 
         for attempt in range(self.max_move_retries + 1):

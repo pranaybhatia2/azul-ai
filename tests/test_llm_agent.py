@@ -2,8 +2,10 @@
 from azul.agent import Agent
 from azul.llm_agent import (
     LLMAgent,
+    describe_candidate_moves,
     describe_legal_moves,
     describe_state,
+    rank_moves,
     _extract_move,
 )
 from azul.render import move_to_shortcut
@@ -56,6 +58,31 @@ def test_legal_move_annotations_flag_completion_and_bonus():
     line = next(ln for ln in text.splitlines() if ln.strip().startswith("0b0"))
     assert "COMPLETES" in line
     assert "+7" in line  # finishing column 0
+
+
+def test_rank_moves_matches_greedy_top_choice():
+    # The top-ranked candidate must be the move GreedyAgent would pick.
+    from azul.agent import GreedyAgent
+    gs = GameState.new_game(42)
+    ranked = rank_moves(gs)
+    assert ranked[0][0] == GreedyAgent().choose_move(gs)
+    # Scores are sorted descending.
+    scores = [s for _, s in ranked]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_rank_moves_truncates_to_k():
+    gs = GameState.new_game(42)
+    assert len(rank_moves(gs, 5)) == 5
+
+
+def test_describe_candidate_moves_shows_eval_and_codes():
+    gs = GameState.new_game(42)
+    scored = rank_moves(gs, 8)
+    text = describe_candidate_moves(gs, scored)
+    assert "eval" in text
+    for move, _ in scored:
+        assert move_to_shortcut(move) in text
 
 
 def test_legal_move_annotations_flag_overflow():
@@ -130,8 +157,21 @@ def test_system_prompt_and_state_reach_the_model():
 
     LLMAgent(complete=fake_complete).choose_move(gs)
     assert "Azul" in seen["system"]
-    assert "LEGAL MOVES" in seen["user"]
+    assert "CANDIDATE MOVES" in seen["user"]  # default hybrid mode (top_k)
     assert "YOUR BOARD" in seen["user"]
+
+
+def test_all_moves_mode_when_top_k_none():
+    gs = GameState.new_game(42)
+    legal_code = move_to_shortcut(gs.legal_moves()[0])
+    seen = {}
+
+    def fake_complete(system, messages):
+        seen["user"] = messages[0]["content"]
+        return f"MOVE: {legal_code}"
+
+    LLMAgent(complete=fake_complete, top_k=None).choose_move(gs)
+    assert "LEGAL MOVES" in seen["user"]
 
 
 def test_retries_after_illegal_move_then_succeeds():
