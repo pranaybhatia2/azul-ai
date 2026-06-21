@@ -172,7 +172,11 @@ class GameState:
 
     def is_game_over(self) -> bool:
         """True when any player has completed a full horizontal wall row."""
-        raise NotImplementedError
+        return any(
+            all(cell is not None for cell in board.wall[row])
+            for board in self.player_boards
+            for row in range(5)
+        )
 
     def apply(self, move: Move) -> None:
         """Apply move in place. Mutates self."""
