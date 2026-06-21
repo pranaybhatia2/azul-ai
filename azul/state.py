@@ -102,6 +102,14 @@ class GameState:
     # Infrastructure (implemented)
     # ------------------------------------------------------------------
 
+    @classmethod
+    def new_game(cls, seed: int) -> GameState:
+        """Construct a fresh game state ready for round 1."""
+        import random
+        gs = cls()
+        gs.refill_factories(random.Random(seed))
+        return gs
+
     def clone(self) -> GameState:
         return copy.deepcopy(self)
 
