@@ -22,7 +22,9 @@ A 2-player implementation of the board game Azul, with progressively smarter AI 
 | 5 | MCTS + UCB | Monte Carlo, exploration/exploitation |
 | 6 | Self-play NN (AlphaZero-lite) | RL, policy/value networks, self-play |
 | 7 | Evaluation harness | Tournaments, reproducibility |
-Currently: **Phase 6 complete — roadmap done** (Phases 1–6 built & tested)
+Currently: **Phase 6 complete — roadmap done** (Phases 1–6 built & tested).
+Scaled cloud self-play has the NN climbing past Greedy (0→33% over 4 iters) —
+the laptop plateau was a compute wall, broken on Modal.
 
 - Phase 1: engine complete — state, scoring, move gen, refill, new_game. All TDD'd.
 - Phase 2: `Agent` ABC, `end_game_bonus()`, `Game` loop (`play()`/`step()`),
@@ -70,27 +72,33 @@ Currently: **Phase 6 complete — roadmap done** (Phases 1–6 built & tested)
       strong-play value targets, 512-wide net, 2739 examples, loss 5.57->2.68):
       **100% vs Random**, still 0-12 vs Greedy at 200 AND 400 play-time sims.
 
-  **Why the Greedy bar held (well-evidenced, not a bug):**
-    1. More play-time sims don't help (0-6 at 200 and 400) → the bottleneck is
-       the learned VALUE head, not search budget.
-    2. On CPU the net can only be distilled from the heuristic (or from
-       search whose visit-count signal is starved by Azul's ~90-move
-       branching), so it asymptotes at ~Greedy strength — a fuzzy copy of
-       Greedy. Beating a sharp 1-ply heuristic needs genuine multi-step
-       planning, which Minimax/MCTS get from DEPTH (both beat Greedy 8-0) but
-       a learned value can't reveal at this simulation budget.
-    3. Same branching-factor wall as Phases 4-5, now shown to also starve the
-       NN's training signal. Clearing it needs AlphaZero-scale self-play
-       (thousands of sims/move) → a GPU, not a code change.
+  On a LAPTOP the Greedy bar held: more play-time sims didn't help (0-6 at 200
+  and 400) and every distillation asymptoted at ~Greedy strength. It looked
+  like a method wall. It wasn't — it was compute starvation.
+
+  **BREAKTHROUGH — scaled self-play breaks the wall (Modal cloud).** With
+  C (action-space pruning, `pruning.py` — drops dominated optional floor-dumps)
+  + scaled self-play (800 sims/move, ~3200 examples/iter, fanned across
+  cloud containers), genuine AlphaZero refinement of the distilled net CLIMBED
+  vs Greedy:
+        iter 0: 0%  →  iter 1: 8%  →  iter 2: 17%  →  iter 3: 33%
+  First-ever NN wins vs Greedy, monotonic — the policy-improvement loop working
+  once fed enough simulations. Self-play improvement is open-ended (NOT capped
+  at the teacher, unlike distillation). The laptop plateau was the
+  branching-factor compute wall (same as Phases 4-5); cloud scale clears it.
+
+## Scaling infra (scripts/modal_train.py, docs/MODAL.md)
+  Workload is CPU-bound (tiny net) → scale = many CPU containers, not a GPU.
+  Lesson: a remote orchestrator fanning out via nested starmap does NOT survive
+  the launcher disconnecting (children get cancelled). Robust form: one
+  self-contained detached `run_training` (cpu=16) doing self-play via internal
+  multiprocessing, `.spawn()`-launched, resuming from the Volume checkpoint.
+  Progress: `modal volume get azul-checkpoints metrics.txt .`
 
 ## Final agent ladder
-  Random  <  Greedy ≈ NN (100% vs Random)  <  Minimax ≈ MCTS (both 8-0 vs Greedy)
-  All behind one `Agent` interface; comparable via `play_match`. The search
-  agents are the Greedy-beaters; the NN matches Greedy on CPU compute.
-
-## How to actually beat Greedy with the NN (GPU-scale self-play)
-  See the "GPU self-play" notes below — the method is right, only the compute
-  budget (sims/move × games × iterations) is short.
+  Random  <  Greedy  <  { NN-after-scaled-self-play (climbing past Greedy),
+                          Minimax, MCTS (both 8-0 vs Greedy) }
+  All behind one `Agent` interface; comparable via `play_match`.
 ---
 ## State representation decisions
 These were made deliberately — don't change without discussion.
