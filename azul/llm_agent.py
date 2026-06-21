@@ -78,14 +78,28 @@ STRATEGY TIPS:
 - Build out from tiles you already have: adjacency (both a horizontal and a \
 vertical run at once) is where the points are. Favor the central columns early \
 to keep future placement options open.
-- Columns (+7) are very valuable and achievable; the 5-tile bottom row and a \
-full color set are hard in a 2-player game (tiles usually don't recycle), so \
-don't over-invest in them.
+- END-GAME BONUSES DECIDE CLOSE GAMES. A completed COLUMN is +7 and is the \
+single biggest swing — actively drive your near-complete columns to 5. Use the \
+'Wall progress' counts for both players: a column at 4/5, or a color at 4/5 \
+(+10), is worth chasing. The 5-tile bottom row and full color sets are hard in \
+a 2-player game (tiles usually don't recycle), so weigh them against easier \
+columns.
+- DON'T SCATTER LATE. Placing single tiles across many different rows wastes \
+turns; concentrating tiles to actually COMPLETE a line — especially to finish a \
+column — is what scores. Late in the game, prefer the move that completes (or \
+directly sets up completing) a line or column over one that merely starts a new \
+line.
 - The top rows (smaller pattern lines) complete fastest — the 1-tile row 0 is \
 the quickest path and watch for the opponent racing it to end the game early.
 - Only stage what you can finish: tiles left in a pattern line at game end score \
 nothing, and overfilling dumps tiles onto your floor for penalties. Most games \
 last ~5 rounds — don't plan long chains in the big bottom rows.
+- Avoid dumping tiles to the floor unless you truly have no better placement, \
+and especially avoid floor dumps on the last round where they are pure loss.
+- TIME THE GAME END. The game ends the round any player completes a full wall \
+row. If you are ahead on the board but behind on pending end-game bonuses \
+(near-complete columns/colors), don't be the one to end it early; if you are \
+ahead overall, ending it can deny the opponent their bonuses.
 - Order matters within a round: scoring happens top-to-bottom, so completing a \
 line adjacent to one you'll also complete this round compounds the score.
 - Denial matters: if the opponent can't place a color (their only open line for \
@@ -119,6 +133,36 @@ def _describe_wall_row(wall_row: list[Optional[Color]], row: int) -> str:
     return ", ".join(cells)
 
 
+def _wall_progress(board) -> list[str]:
+    """Counts toward the end-game bonuses, so the model doesn't have to tally
+    the wall itself: per-column (5 -> +7), per-row (5 -> +2 and ENDS the game),
+    per-color (5 -> +10)."""
+    wall = board.wall
+    col_counts = [
+        sum(wall[r][c] is not None for r in range(5)) for c in range(5)
+    ]
+    row_counts = [
+        sum(wall[r][c] is not None for c in range(5)) for r in range(5)
+    ]
+    color_counts = {
+        color: sum(
+            wall[r][c] == color for r in range(5) for c in range(5)
+        )
+        for color in Color
+    }
+    cols = ", ".join(f"col{c}={col_counts[c]}/5" for c in range(5))
+    rows = ", ".join(f"row{r}={row_counts[r]}/5" for r in range(5))
+    colors = ", ".join(
+        f"{color_name(c)}={color_counts[c]}/5" for c in Color
+    )
+    return [
+        "  Wall progress toward end-game bonuses:",
+        f"    columns (5 = +7): {cols}",
+        f"    rows (5 = +2, and completing one ENDS the game): {rows}",
+        f"    colors (5 = +10): {colors}",
+    ]
+
+
 def _describe_board(state: GameState, player: int, label: str) -> str:
     board = state.player_boards[player]
     lines = [f"{label} (Player {player}) — score {board.score}:"]
@@ -136,6 +180,8 @@ def _describe_board(state: GameState, player: int, label: str) -> str:
     lines.append("  Wall (each cell's fixed target color; [placed] = filled):")
     for row in range(5):
         lines.append(f"    row {row}: {_describe_wall_row(board.wall[row], row)}")
+
+    lines.extend(_wall_progress(board))
 
     floor = f"  Floor: {board.floor_count} tile(s)"
     if board.has_first_player_marker:
