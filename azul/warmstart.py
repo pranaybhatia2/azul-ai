@@ -70,12 +70,55 @@ def generate_supervised_examples(n_games: int, *, rng=None, temp: float = 2.0):
     return examples
 
 
-def warm_start(net: AzulNet, *, n_games: int = 60, epochs: int = 8,
-               batch_size: int = 64, lr: float = 1e-3, temp: float = 2.0,
-               rng=None) -> list[float]:
-    """Pretrain `net` on supervised greedy data. Returns per-epoch avg loss."""
+def generate_teacher_examples(n_games: int, *, rng=None, teacher_iters: int = 120,
+                              rollout_depth: int = 6, temp_cutoff: int = 10):
+    """Distillation data from the Phase-5 MCTS agent (which BEATS Greedy 8-0).
+
+    The net's ceiling is its teacher's strength, so distilling the MCTS agent —
+    not Greedy — is what lets the net surpass Greedy. Each state is labelled
+    with the teacher's visit-count policy and the game's MC outcome.
+    """
+    from azul.mcts import MCTSAgent   # local import to avoid a cycle
+
     rng = rng if rng is not None else random.Random()
-    examples = generate_supervised_examples(n_games, rng=rng, temp=temp)
+    teacher = MCTSAgent(iterations=teacher_iters, rng=rng,
+                        rollout="greedy", rollout_depth=rollout_depth)
+    examples = []
+    for _ in range(n_games):
+        state = GameState()
+        state.refill_factories(rng)
+        pending = []
+        move_num = 0
+        while True:
+            visits = teacher.visit_counts(state)
+            total = sum(visits.values()) or 1
+            policy = [0.0] * POLICY_SIZE
+            for m, n in visits.items():
+                policy[move_to_index(m)] = n / total
+            pending.append((encode_state(state), policy, state.current_player))
+
+            if move_num < temp_cutoff:
+                moves = list(visits.keys())
+                weights = [visits[m] for m in moves]
+                move = rng.choices(moves, weights=weights, k=1)[0]
+            else:
+                move = max(visits, key=visits.get)
+            state.apply(move)
+            scores = advance_round_if_over(state, rng)
+            move_num += 1
+            if scores is not None:
+                winner = winner_of(scores)
+                examples.extend((enc, pol, _value_for(p, winner))
+                                for enc, pol, p in pending)
+                break
+    return examples
+
+
+def pretrain(net: AzulNet, examples, *, epochs: int = 8, batch_size: int = 64,
+             lr: float = 1e-3, rng=None) -> list[float]:
+    """Supervised training of `net` on labelled examples. Returns per-epoch
+    average loss."""
+    rng = rng if rng is not None else random.Random()
     opt = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=1e-4)
     losses = []
     for _ in range(epochs):
@@ -87,3 +130,13 @@ def warm_start(net: AzulNet, *, n_games: int = 60, epochs: int = 8,
                 batch_losses.append(train_step(net, opt, batch)[0])
         losses.append(sum(batch_losses) / len(batch_losses))
     return losses
+
+
+def warm_start(net: AzulNet, *, n_games: int = 60, epochs: int = 8,
+               batch_size: int = 64, lr: float = 1e-3, temp: float = 2.0,
+               rng=None) -> list[float]:
+    """Pretrain `net` on supervised GREEDY data (ceiling ~Greedy strength)."""
+    rng = rng if rng is not None else random.Random()
+    examples = generate_supervised_examples(n_games, rng=rng, temp=temp)
+    return pretrain(net, examples, epochs=epochs, batch_size=batch_size,
+                    lr=lr, rng=rng)

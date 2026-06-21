@@ -64,15 +64,19 @@ class MCTSAgent(Agent):
         self.eval_scale = eval_scale
 
     def choose_move(self, state: GameState) -> Move:
+        visits = self.visit_counts(state)
+        return max(visits, key=visits.get)   # most-visited root move
+
+    def visit_counts(self, state: GameState) -> dict[Move, int]:
+        """Run the search and return {move: visit_count} at the root. Used both
+        for move choice and as a teacher's policy target for distillation."""
         root = _Node(state.clone(), parent=None, move=None)
         for _ in range(self.iterations):
             node = self._select(root)
             node = self._expand(node)
             r0 = self._rollout(node)          # reward for player 0, in [0,1]
             self._backpropagate(node, r0)
-        # Robust child: most-visited root move.
-        best = max(root.children, key=lambda c: c.visits)
-        return best.move
+        return {c.move: c.visits for c in root.children}
 
     # ------------------------------------------------------------------
 
