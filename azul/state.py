@@ -73,6 +73,15 @@ class PlayerBoard:
     has_first_player_marker: bool = False
     score: int = 0
 
+    def _clone(self) -> "PlayerBoard":
+        b = PlayerBoard.__new__(PlayerBoard)
+        b.pattern_lines = [PatternLine(pl.color, pl.count) for pl in self.pattern_lines]
+        b.wall = [row[:] for row in self.wall]
+        b.floor_count = self.floor_count
+        b.has_first_player_marker = self.has_first_player_marker
+        b.score = self.score
+        return b
+
 
 # ---------------------------------------------------------------------------
 # Game state
@@ -111,7 +120,20 @@ class GameState:
         return gs
 
     def clone(self) -> GameState:
-        return copy.deepcopy(self)
+        # Hand-written copy: dict/list containers are duplicated, immutable
+        # leaves (Color, int, None) are shared. ~20-50x faster than deepcopy,
+        # which dominated search time (see CONTEXT.md Phase 4 finding). This is
+        # the swap the stable search boundary was designed to allow.
+        gs = GameState.__new__(GameState)
+        gs.factories = [dict(f) for f in self.factories]
+        gs.center = dict(self.center)
+        gs.player_boards = [b._clone() for b in self.player_boards]
+        gs.bag = dict(self.bag)
+        gs.discard = dict(self.discard)
+        gs.current_player = self.current_player
+        gs.round_number = self.round_number
+        gs.first_player_marker_in_center = self.first_player_marker_in_center
+        return gs
 
     # ------------------------------------------------------------------
     # Game logic stubs — Pranay implements these, driven by tests
