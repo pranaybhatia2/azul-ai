@@ -114,6 +114,47 @@ def generate_teacher_examples(n_games: int, *, rng=None, teacher_iters: int = 12
     return examples
 
 
+def generate_hybrid_examples(n_games: int, *, rng=None, teacher_iters: int = 250,
+                             rollout_depth: int = 8, temp: float = 2.0,
+                             temp_cutoff: int = 8):
+    """Best-shot distillation data: states come from STRONG MCTS self-play
+    (so value targets reflect strong play + real outcomes), but each state is
+    labelled with the CLEAN greedy-softmax policy (not the starved visit
+    counts) and the game's MC outcome value. Targets the value-head bottleneck.
+    """
+    from azul.mcts import MCTSAgent
+
+    rng = rng if rng is not None else random.Random()
+    teacher = MCTSAgent(iterations=teacher_iters, rng=rng,
+                        rollout="greedy", rollout_depth=rollout_depth)
+    examples = []
+    for _ in range(n_games):
+        state = GameState()
+        state.refill_factories(rng)
+        pending = []
+        move_num = 0
+        while True:
+            policy, _, _ = _greedy_softmax(state, temp)   # clean policy target
+            pending.append((encode_state(state), policy, state.current_player))
+
+            visits = teacher.visit_counts(state)          # strong teacher moves
+            if move_num < temp_cutoff:
+                moves = list(visits.keys())
+                weights = [visits[m] for m in moves]
+                move = rng.choices(moves, weights=weights, k=1)[0]
+            else:
+                move = max(visits, key=visits.get)
+            state.apply(move)
+            scores = advance_round_if_over(state, rng)
+            move_num += 1
+            if scores is not None:
+                winner = winner_of(scores)
+                examples.extend((enc, pol, _value_for(p, winner))
+                                for enc, pol, p in pending)
+                break
+    return examples
+
+
 def pretrain(net: AzulNet, examples, *, epochs: int = 8, batch_size: int = 64,
              lr: float = 1e-3, rng=None) -> list[float]:
     """Supervised training of `net` on labelled examples. Returns per-epoch

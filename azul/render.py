@@ -177,6 +177,15 @@ def parse_move_shortcut(text: str) -> Optional[Move]:
     return Move(source, color, dest)
 
 
+def move_to_shortcut(move: Move) -> str:
+    """Inverse of parse_move_shortcut: render a Move as its 3-char code, e.g.
+    Move(0, YELLOW, 2) -> '0y2', Move(CENTER, RED, FLOOR) -> 'crf'."""
+    src = "c" if move.source == CENTER else str(move.source)
+    color = GLYPH[move.color].lower()
+    row = "f" if move.dest_line == FLOOR else str(move.dest_line)
+    return f"{src}{color}{row}"
+
+
 def _compress_rows(rows: list[int]) -> str:
     """[0,1,2,3,4] -> '0-4'; [0,2,3,4] -> '0,2-4'."""
     if not rows:

@@ -8,7 +8,7 @@ import torch
 
 from azul.warmstart import (
     generate_supervised_examples, _greedy_softmax, warm_start,
-    generate_teacher_examples, pretrain,
+    generate_teacher_examples, generate_hybrid_examples, pretrain,
 )
 from azul.net import AzulNet
 from azul.encoding import STATE_SIZE, POLICY_SIZE, move_to_index
@@ -49,6 +49,17 @@ def test_teacher_examples_shapes():
     # Small/fast teacher config — just validate the data plumbing.
     ex = generate_teacher_examples(1, rng=random.Random(0), teacher_iters=20,
                                    rollout_depth=4)
+    assert len(ex) > 0
+    for enc, pol, val in ex:
+        assert len(enc) == STATE_SIZE
+        assert len(pol) == POLICY_SIZE
+        assert abs(sum(pol) - 1.0) < 1e-6
+        assert val in (-1.0, 0.0, 1.0)
+
+
+def test_hybrid_examples_shapes():
+    ex = generate_hybrid_examples(1, rng=random.Random(0), teacher_iters=15,
+                                  rollout_depth=3)
     assert len(ex) > 0
     for enc, pol, val in ex:
         assert len(enc) == STATE_SIZE
