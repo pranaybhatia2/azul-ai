@@ -31,6 +31,27 @@ class RandomAgent(Agent):
         return self.rng.choice(state.legal_moves())
 
 
+class GreedyAgent(Agent):
+    """One-ply lookahead: applies each legal move to a clone, scores the
+    resulting position with evaluate(), and picks the best. Ties go to the
+    first move in legal_moves()'s sorted order (deterministic)."""
+
+    def choose_move(self, state: GameState) -> Move:
+        from azul.heuristics import evaluate
+
+        me = state.current_player
+        best_move = None
+        best_value = float("-inf")
+        for move in state.legal_moves():
+            nxt = state.clone()
+            nxt.apply(move)
+            value = evaluate(nxt, me)
+            if value > best_value:
+                best_value = value
+                best_move = move
+        return best_move
+
+
 class HumanAgent(Agent):
     """Renders the board and reads a move choice from stdin.
 
