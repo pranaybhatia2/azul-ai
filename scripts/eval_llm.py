@@ -90,6 +90,9 @@ def main(argv=None) -> None:
                         help="print the model's reply each turn")
     args = parser.parse_args(argv)
 
+    from azul.envfile import load_env
+    load_env()  # pick up ANTHROPIC_API_KEY from a local .env
+
     global MCTS_ITERATIONS
     MCTS_ITERATIONS = args.mcts_iterations
 
