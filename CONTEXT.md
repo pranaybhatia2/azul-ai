@@ -22,7 +22,13 @@ A 2-player implementation of the board game Azul, with progressively smarter AI 
 | 5 | MCTS + UCB | Monte Carlo, exploration/exploitation |
 | 6 | Self-play NN (AlphaZero-lite) | RL, policy/value networks, self-play |
 | 7 | Evaluation harness | Tournaments, reproducibility |
-Currently: **Phase 1**
+Currently: **Phase 3** (Phases 1 & 2 complete)
+
+- Phase 1: engine complete — state, scoring, move gen, refill, new_game. All TDD'd.
+- Phase 2: `Agent` ABC, `end_game_bonus()`, `Game` loop (`play()`/`step()`),
+  `RandomAgent`, `HumanAgent`, text `render()`. Loop handles two game-ending
+  conditions: completed wall row, and tile starvation (bag+discard exhausted).
+  Agents receive a `clone()` of the state (safe, optimize later).
 ---
 ## State representation decisions
 These were made deliberately — don't change without discussion.
