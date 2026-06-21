@@ -22,7 +22,7 @@ A 2-player implementation of the board game Azul, with progressively smarter AI 
 | 5 | MCTS + UCB | Monte Carlo, exploration/exploitation |
 | 6 | Self-play NN (AlphaZero-lite) | RL, policy/value networks, self-play |
 | 7 | Evaluation harness | Tournaments, reproducibility |
-Currently: **Phase 5** (Phases 1–4 complete)
+Currently: **Phase 6** (Phases 1–5 complete)
 
 - Phase 1: engine complete — state, scoring, move gen, refill, new_game. All TDD'd.
 - Phase 2: `Agent` ABC, `end_game_bonus()`, `Game` loop (`play()`/`step()`),
@@ -39,7 +39,20 @@ Currently: **Phase 5** (Phases 1–4 complete)
   gets ~0 hits — transpositions are rare in Azul (moves consume specific tiles
   + players alternate, so positions diverge). So Zobrist (planned for Phase 4)
   was DEFERRED: it speeds the TT key, but the TT barely helps here. The real
-  bottleneck is `clone()`. Both clone-perf and Zobrist are deferred, not done.
+  bottleneck is `clone()`. Zobrist still deferred (TT barely helps here).
+- clone() optimization (done in Phase 5): hand-written copy replaced deepcopy,
+  ~60x faster (240us->4us; minimax d3 1726ms->331ms). Behind the stable
+  boundary — no API/behavior change. Enabled practical greedy rollouts.
+- Phase 5: `MCTSAgent` (azul/mcts.py) — UCB1 select/expand/rollout/backprop,
+  most-visits choice, seeded rng. Round transitions in rollouts via shared
+  `advance_round_if_over` (azul/game.py). Findings:
+    * random rollouts: beat Random 5-0, LOSE to Greedy 0-4 (random Azul play
+      too weak to give signal).
+    * greedy rollouts: improve to 2-4 vs Greedy but iteration-starved.
+    * truncated rollouts (play N moves then score with evaluate(), squashed to
+      [0,1]): depth-8 greedy @400it beats Greedy 8-0 — matches Minimax.
+      depth-0 (eval node immediately) LOSES 1-7, so a few rollout moves matter.
+  Reward stored per-node from player-0's perspective (flip for P1).
 ---
 ## State representation decisions
 These were made deliberately — don't change without discussion.

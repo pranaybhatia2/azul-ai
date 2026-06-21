@@ -78,3 +78,26 @@ def test_greedy_rollout_deterministic():
     a = MCTSAgent(iterations=20, rng=random.Random(3), rollout="greedy").choose_move(gs)
     b = MCTSAgent(iterations=20, rng=random.Random(3), rollout="greedy").choose_move(gs)
     assert a == b
+
+
+# --- truncated rollouts + eval ---
+
+def test_eval_reward_bounds_and_direction():
+    agent = MCTSAgent(eval_scale=10.0)
+    neutral = GameState()
+    assert abs(agent._eval_reward(neutral) - 0.5) < 1e-9   # equal boards -> 0.5
+    neutral.player_boards[0].score = 20                    # P0 ahead
+    r = agent._eval_reward(neutral)
+    assert 0.5 < r < 1.0
+
+    neutral.player_boards[1].score = 40                    # now P1 ahead
+    assert agent._eval_reward(neutral) < 0.5
+
+
+def test_truncated_rollout_legal_and_deterministic():
+    gs = GameState.new_game(42)
+    kw = dict(iterations=40, rollout="greedy", rollout_depth=4)
+    a = MCTSAgent(rng=random.Random(5), **kw).choose_move(gs)
+    b = MCTSAgent(rng=random.Random(5), **kw).choose_move(gs)
+    assert a == b
+    assert a in gs.legal_moves()

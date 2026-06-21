@@ -19,6 +19,7 @@ from typing import Optional
 
 from azul.agent import Agent
 from azul.game import advance_round_if_over, winner_of
+from azul.heuristics import evaluate
 from azul.state import GameState, Move
 
 SQRT2 = math.sqrt(2)
@@ -49,21 +50,26 @@ class _Node:
 
 class MCTSAgent(Agent):
     def __init__(self, iterations: int = 200, rng=None, c: float = SQRT2,
-                 rollout: str = "random"):
+                 rollout: str = "random", rollout_depth: Optional[int] = None,
+                 eval_scale: float = 10.0):
         if rollout not in ("random", "greedy"):
             raise ValueError("rollout must be 'random' or 'greedy'")
         self.iterations = iterations
         self.rng = rng if rng is not None else random.Random()
         self.c = c
         self.rollout = rollout
+        # rollout_depth=None plays to game end; an int truncates after that
+        # many moves and scores with evaluate() (squashed to [0,1] by eval_scale).
+        self.rollout_depth = rollout_depth
+        self.eval_scale = eval_scale
 
     def choose_move(self, state: GameState) -> Move:
         root = _Node(state.clone(), parent=None, move=None)
         for _ in range(self.iterations):
             node = self._select(root)
             node = self._expand(node)
-            winner = self._rollout(node)
-            self._backpropagate(node, winner)
+            r0 = self._rollout(node)          # reward for player 0, in [0,1]
+            self._backpropagate(node, r0)
         # Robust child: most-visited root move.
         best = max(root.children, key=lambda c: c.visits)
         return best.move
@@ -103,20 +109,31 @@ class MCTSAgent(Agent):
         node.children.append(child)
         return child
 
-    def _rollout(self, node: _Node) -> Optional[int]:
+    def _rollout(self, node: _Node) -> float:
+        """Return the rollout reward FROM PLAYER 0's PERSPECTIVE, in [0,1].
+        Terminal -> win/loss/tie. Truncated -> squashed evaluate()."""
         if node.terminal:
-            return node.winner
+            return _reward(node.winner, 0)
         s = node.state.clone()
+        steps = 0
         while True:
+            if self.rollout_depth is not None and steps >= self.rollout_depth:
+                return self._eval_reward(s)
             moves = s.legal_moves()
             if self.rollout == "greedy":
                 move = self._greedy_move(s, moves)
             else:
                 move = self.rng.choice(moves)
             s.apply(move)
+            steps += 1
             scores = advance_round_if_over(s, self.rng)
             if scores is not None:
-                return winner_of(scores)
+                return _reward(winner_of(scores), 0)
+
+    def _eval_reward(self, state) -> float:
+        """Squash the relative heuristic value into a [0,1] reward for P0."""
+        v = evaluate(state, 0) - evaluate(state, 1)
+        return 1.0 / (1.0 + math.exp(-v / self.eval_scale))
 
     def _greedy_move(self, state, moves):
         """Best move for the side to move by one-ply evaluate() (same rule as
@@ -132,9 +149,11 @@ class MCTSAgent(Agent):
                 best_val, best_move = val, move
         return best_move
 
-    def _backpropagate(self, node: _Node, winner: Optional[int]) -> None:
+    def _backpropagate(self, node: _Node, r0: float) -> None:
+        # r0 is the reward for player 0; the value stored at each node is from
+        # the perspective of the player who moved into it (its parent's mover).
         while node is not None:
             node.visits += 1
             if node.parent is not None:
-                node.value += _reward(winner, node.parent.player)
+                node.value += r0 if node.parent.player == 0 else (1.0 - r0)
             node = node.parent
