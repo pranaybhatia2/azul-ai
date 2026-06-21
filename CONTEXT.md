@@ -2,8 +2,8 @@
 ## What this is
 A 2-player implementation of the board game Azul, with progressively smarter AI agents trained to play it. Built as a learning project: the goal is to understand CS principles (state representation, TDD, game-tree search, Monte Carlo methods, self-play RL) — not to vibe-code a finished product. AI is used heavily for scaffolding and explanation, but Pranay writes the load-bearing logic.
 ## The deal
-- Claude scaffolds structure, explains concepts, writes tests alongside Pranay
-- Pranay writes the game logic (scoring, move generation, etc.)
+- Pranay reviews and co-creates key design decisions, specs, and direction
+- Claude writes all the code — logic, tests, scaffolding, everything
 - Nothing moves to the next phase until tests pass
 - The tests are the discipline
 ## Stack
