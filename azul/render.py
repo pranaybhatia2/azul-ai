@@ -156,17 +156,33 @@ def _source_label(source: int) -> str:
     return "Center" if source == CENTER else f"Factory {source}"
 
 
-def render_move_menu(moves: list[Move]) -> tuple[str, list[Move]]:
-    """Return (menu_text, indexed_moves) for the primary moves, grouped by
-    source. indexed_moves[i] is the move chosen by entering i.
-    """
-    primary, _ = organize_moves(moves)
-    out_lines: list[str] = []
-    last_source = object()
-    for i, m in enumerate(primary):
-        if m.source != last_source:
-            out_lines.append(f"  {_source_label(m.source)}:")
-            last_source = m.source
+def ordered_sources(moves: list[Move]) -> list[int]:
+    """Sources that have at least one legal move, factories ascending then
+    Center last."""
+    present = {m.source for m in moves}
+    factories = sorted(s for s in present if s != CENTER)
+    return factories + ([CENTER] if CENTER in present else [])
+
+
+def render_source_menu(state: GameState, sources: list[int], color=None) -> str:
+    """Step 1 of two-step selection: which factory/center to take from."""
+    uc = _use_color(color)
+    lines = ["Take tiles from:"]
+    for i, s in enumerate(sources):
+        pool = state.center if s == CENTER else state.factories[s]
+        extra = ("  [+1st-player marker]"
+                 if s == CENTER and state.first_player_marker_in_center else "")
+        lines.append(f"  [{i}] {_source_label(s)}: {_pool_str(pool, uc)}{extra}")
+    return "\n".join(lines)
+
+
+def render_placement_menu(src_moves: list[Move]) -> tuple[list[Move], list[Move], str]:
+    """Step 2: placements for the chosen source. Returns
+    (primary, optional_floor, menu_text). Floor dumps are hidden unless forced
+    (a color with no open pattern line)."""
+    primary, optional_floor = organize_moves(src_moves)
+    lines = []
+    for j, m in enumerate(primary):
         dest = "floor (forced)" if m.dest_line == FLOOR else f"row {m.dest_line}"
-        out_lines.append(f"    [{i}] {color_name(m.color)} -> {dest}")
-    return "\n".join(out_lines), primary
+        lines.append(f"  [{j}] {color_name(m.color)} -> {dest}")
+    return primary, optional_floor, "\n".join(lines)

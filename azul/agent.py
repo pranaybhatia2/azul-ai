@@ -68,37 +68,64 @@ class HumanAgent(Agent):
     def choose_move(self, state: GameState) -> Move:
         # Imported here to avoid a hard dependency for headless agents.
         from azul.render import (
-            render, render_move, organize_moves, render_move_menu,
+            render, ordered_sources, render_source_menu, render_placement_menu,
         )
 
         inp = self._input if self._input is not None else input
         out = self._output if self._output is not None else print
 
         moves = state.legal_moves()
-        _, optional_floor = organize_moves(moves)
-        menu_text, indexed = render_move_menu(moves)
-
         out(render(state))
-        out("Your moves:")
-        out(menu_text)
-        if optional_floor:
-            out("    [f] dump a color to the floor (penalty)")
 
+        while True:  # outer loop lets the player back out of a source
+            sources = ordered_sources(moves)
+            out(render_source_menu(state, sources))
+            source = self._read_index(inp, out, len(sources), "Choose source")
+            source = sources[source]
+
+            src_moves = [m for m in moves if m.source == source]
+            primary, optional_floor, menu = render_placement_menu(src_moves)
+            out(f"Place tiles (b = back to sources):")
+            out(menu)
+            if optional_floor:
+                out("  [f] dump a color to the floor (penalty)")
+
+            chosen = self._read_placement(inp, out, primary, optional_floor)
+            if chosen is not None:
+                return chosen
+            # chosen is None -> player typed 'b'; re-show source menu.
+
+    def _read_index(self, inp, out, n, prompt):
+        """Read a valid index in [0, n)."""
         while True:
-            raw = inp(f"Choose [0-{len(indexed) - 1}]"
-                      + (" or f: " if optional_floor else ": "))
-            raw = raw.strip().lower()
-
-            if raw == "f" and optional_floor:
-                return self._choose_floor(optional_floor, inp, out)
-
+            raw = inp(f"{prompt} [0-{n - 1}]: ").strip()
             try:
                 idx = int(raw)
             except (ValueError, TypeError):
-                out("Please enter a number" + (" or 'f'." if optional_floor else "."))
+                out("Please enter a number.")
                 continue
-            if 0 <= idx < len(indexed):
-                return indexed[idx]
+            if 0 <= idx < n:
+                return idx
+            out("Out of range.")
+
+    def _read_placement(self, inp, out, primary, optional_floor):
+        """Return chosen Move, or None if the player typed 'b' (go back)."""
+        while True:
+            raw = inp(f"Choose [0-{len(primary) - 1}]"
+                      + (", f" if optional_floor else "")
+                      + ", or b: ").strip().lower()
+            if raw == "b":
+                return None
+            if raw == "f" and optional_floor:
+                return self._choose_floor(optional_floor, inp, out)
+            try:
+                idx = int(raw)
+            except (ValueError, TypeError):
+                out("Please enter a number, 'b'"
+                    + (", or 'f'." if optional_floor else "."))
+                continue
+            if 0 <= idx < len(primary):
+                return primary[idx]
             out("Out of range.")
 
     @staticmethod

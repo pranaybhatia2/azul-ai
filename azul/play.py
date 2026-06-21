@@ -28,6 +28,11 @@ def _make_opponent(name: str, seed: int):
         return RandomAgent(random.Random(seed))
     if name == "greedy":
         return GreedyAgent()
+    if name == "mcts":
+        from azul.mcts import MCTSAgent
+        # Tuned for interactive speed (~2-4s/move) while still strong.
+        return MCTSAgent(iterations=150, rng=random.Random(seed),
+                         rollout="greedy", rollout_depth=6)
     raise ValueError(f"unknown opponent: {name}")
 
 
@@ -37,7 +42,8 @@ def main(argv: list[str] | None = None) -> None:
                         help="random seed (reproducible game)")
     parser.add_argument("--seed", dest="seed_flag", type=int, default=None,
                         help="random seed (alternative to positional)")
-    parser.add_argument("--opponent", choices=["greedy", "random"], default="greedy")
+    parser.add_argument("--opponent", choices=["greedy", "random", "mcts"],
+                        default="greedy")
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
     seed = args.seed if args.seed is not None else args.seed_flag

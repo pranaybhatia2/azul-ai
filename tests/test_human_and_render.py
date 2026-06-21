@@ -4,7 +4,8 @@ import random
 from azul.agent import HumanAgent, RandomAgent
 from azul.game import Game
 from azul.render import (
-    render, render_move, render_board, organize_moves, render_move_menu,
+    render, render_move, render_board, organize_moves,
+    ordered_sources, render_source_menu, render_placement_menu,
 )
 from azul.state import Color, GameState, Move, WALL_PATTERN, CENTER, FLOOR
 
@@ -41,34 +42,58 @@ def test_render_move_readable():
 # HumanAgent with injected I/O
 # ---------------------------------------------------------------------------
 
-def test_human_agent_picks_indexed_move():
+def _src_primary(gs, source_pick):
+    """Helper: the primary placements for the source at index `source_pick`."""
+    moves = gs.legal_moves()
+    sources = ordered_sources(moves)
+    source = sources[source_pick]
+    src_moves = [m for m in moves if m.source == source]
+    primary, optional_floor, _ = render_placement_menu(src_moves)
+    return primary, optional_floor
+
+
+def test_human_agent_two_step_selection():
     gs = GameState.new_game(42)
+    # Pick source 0, then placement 0.
+    answers = iter(["0", "0"])
     outputs = []
-    agent = HumanAgent(input_fn=lambda _: "0", output_fn=outputs.append)
+    agent = HumanAgent(input_fn=lambda _: next(answers), output_fn=outputs.append)
     move = agent.choose_move(gs)
-    # Index maps into the primary (grouped) move list, not raw legal_moves.
-    primary, _ = organize_moves(gs.legal_moves())
+    primary, _ = _src_primary(gs, 0)
     assert move == primary[0]
-    assert any("Your moves" in o for o in outputs)
+    assert any("Take tiles from" in o for o in outputs)
 
 
 def test_human_agent_retries_on_bad_input():
     gs = GameState.new_game(42)
-    answers = iter(["nonsense", "999", "1"])
+    # source "0", then a bad placement, then placement "1".
+    answers = iter(["0", "nonsense", "1"])
     outputs = []
     agent = HumanAgent(input_fn=lambda _: next(answers), output_fn=outputs.append)
     move = agent.choose_move(gs)
-    primary, _ = organize_moves(gs.legal_moves())
+    primary, _ = _src_primary(gs, 0)
     assert move == primary[1]
+
+
+def test_human_agent_back_navigation():
+    gs = GameState.new_game(42)
+    # Enter source 1, back out ('b'), then source 0 placement 0.
+    answers = iter(["1", "b", "0", "0"])
+    outputs = []
+    agent = HumanAgent(input_fn=lambda _: next(answers), output_fn=outputs.append)
+    move = agent.choose_move(gs)
+    primary, _ = _src_primary(gs, 0)
+    assert move == primary[0]
 
 
 def test_human_agent_f_opens_floor_submenu():
     gs = GameState.new_game(42)
-    answers = iter(["f", "0"])
+    # source 0, then 'f', then floor option 0.
+    answers = iter(["0", "f", "0"])
     outputs = []
     agent = HumanAgent(input_fn=lambda _: next(answers), output_fn=outputs.append)
     move = agent.choose_move(gs)
-    _, optional_floor = organize_moves(gs.legal_moves())
+    _, optional_floor = _src_primary(gs, 0)
     assert move == optional_floor[0]
     assert move.dest_line == FLOOR
 
@@ -101,11 +126,30 @@ def test_organize_keeps_forced_floor_in_primary():
     assert optional_floor == []
 
 
-def test_menu_groups_by_source():
+def test_ordered_sources_factories_then_center():
+    gs = GameState()
+    gs.factories[2] = {Color.BLUE: 1}
+    gs.factories[0] = {Color.RED: 1}
+    gs.center = {Color.WHITE: 1}
+    srcs = ordered_sources(gs.legal_moves())
+    assert srcs[-1] == CENTER          # center last
+    assert srcs[:-1] == sorted(srcs[:-1])  # factories ascending
+
+
+def test_render_source_menu_lists_sources():
     gs = GameState.new_game(42)
-    text, indexed = render_move_menu(gs.legal_moves())
-    assert "Factory 0:" in text
-    assert len(indexed) > 0
+    sources = ordered_sources(gs.legal_moves())
+    text = render_source_menu(gs, sources)
+    assert "Take tiles from" in text
+    assert "Factory 0" in text
+
+
+def test_render_placement_menu_for_single_source():
+    gs = GameState.new_game(42)
+    src_moves = [m for m in gs.legal_moves() if m.source == 0]
+    primary, optional_floor, text = render_placement_menu(src_moves)
+    assert all(m.source == 0 for m in primary)
+    assert "row" in text
 
 
 def test_human_agent_drives_a_game():
