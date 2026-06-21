@@ -33,6 +33,10 @@ def _make_opponent(name: str, seed: int):
         # Strong config (beats Greedy ~8-0). ~5-8s/move — slower but tougher.
         return MCTSAgent(iterations=600, rng=random.Random(seed),
                          rollout="greedy", rollout_depth=8)
+    if name == "llm":
+        from azul.llm_agent import LLMAgent
+        # Uses Claude via the anthropic SDK (credentials from the environment).
+        return LLMAgent(verbose=True)
     raise ValueError(f"unknown opponent: {name}")
 
 
@@ -42,7 +46,7 @@ def main(argv: list[str] | None = None) -> None:
                         help="random seed (reproducible game)")
     parser.add_argument("--seed", dest="seed_flag", type=int, default=None,
                         help="random seed (alternative to positional)")
-    parser.add_argument("--opponent", choices=["greedy", "random", "mcts"],
+    parser.add_argument("--opponent", choices=["greedy", "random", "mcts", "llm"],
                         default="greedy")
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
