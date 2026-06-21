@@ -133,51 +133,14 @@ def render_move(move: Move) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Move organization for the human menu
+# Shortcut input + the move guide
 # ---------------------------------------------------------------------------
 
-def organize_moves(moves: list[Move]) -> tuple[list[Move], list[Move]]:
-    """Split moves into (primary, optional_floor).
-
-    A floor-dump (dest == FLOOR) is *forced* when that (source, color) has no
-    pattern-line option — those stay in `primary`. All other floor-dumps go to
-    `optional_floor` (hidden behind the [f] option in the menu).
-    """
-    line_moves = [m for m in moves if m.dest_line != FLOOR]
-    floor_moves = [m for m in moves if m.dest_line == FLOOR]
-    has_line = {(m.source, m.color) for m in line_moves}
-
-    forced_floor = [m for m in floor_moves if (m.source, m.color) not in has_line]
-    optional_floor = [m for m in floor_moves if (m.source, m.color) in has_line]
-
-    key = lambda m: (m.source, m.color, m.dest_line)
-    primary = sorted(line_moves + forced_floor, key=key)
-    optional_floor.sort(key=key)
-    return primary, optional_floor
-
-
-def _source_label(source: int) -> str:
-    return "Center" if source == CENTER else f"Factory {source}"
-
-
 def ordered_sources(moves: list[Move]) -> list[int]:
-    """Sources that have at least one legal move, factories ascending then
-    Center last."""
+    """Sources with at least one legal move: factories ascending, Center last."""
     present = {m.source for m in moves}
     factories = sorted(s for s in present if s != CENTER)
     return factories + ([CENTER] if CENTER in present else [])
-
-
-def render_source_menu(state: GameState, sources: list[int], color=None) -> str:
-    """Step 1 of two-step selection: which factory/center to take from."""
-    uc = _use_color(color)
-    lines = ["Take tiles from:"]
-    for i, s in enumerate(sources):
-        pool = state.center if s == CENTER else state.factories[s]
-        extra = ("  [+1st-player marker]"
-                 if s == CENTER and state.first_player_marker_in_center else "")
-        lines.append(f"  [{i}] {_source_label(s)}: {_pool_str(pool, uc)}{extra}")
-    return "\n".join(lines)
 
 
 def parse_move_shortcut(text: str) -> Optional[Move]:
@@ -214,13 +177,45 @@ def parse_move_shortcut(text: str) -> Optional[Move]:
     return Move(source, color, dest)
 
 
-def render_placement_menu(src_moves: list[Move]) -> tuple[list[Move], list[Move], str]:
-    """Step 2: placements for the chosen source. Returns
-    (primary, optional_floor, menu_text). Floor dumps are hidden unless forced
-    (a color with no open pattern line)."""
-    primary, optional_floor = organize_moves(src_moves)
-    lines = []
-    for j, m in enumerate(primary):
-        dest = "floor (forced)" if m.dest_line == FLOOR else f"row {m.dest_line}"
-        lines.append(f"  [{j}] {color_name(m.color)} -> {dest}")
-    return primary, optional_floor, "\n".join(lines)
+def _compress_rows(rows: list[int]) -> str:
+    """[0,1,2,3,4] -> '0-4'; [0,2,3,4] -> '0,2-4'."""
+    if not rows:
+        return ""
+    parts, start, prev = [], rows[0], rows[0]
+    for r in rows[1:]:
+        if r == prev + 1:
+            prev = r
+            continue
+        parts.append(f"{start}-{prev}" if start != prev else f"{start}")
+        start = prev = r
+    parts.append(f"{start}-{prev}" if start != prev else f"{start}")
+    return ",".join(parts)
+
+
+def render_move_guide(state: GameState, moves: list[Move], color=None) -> str:
+    """Shortcut-style guide: each source by its code (0-4 / c) with its colors
+    and the rows each may go to. Floor is always available via row 'f'."""
+    uc = _use_color(color)
+    # source -> {color: [valid pattern rows]}
+    by_src: dict[int, dict] = {}
+    for m in moves:
+        cols = by_src.setdefault(m.source, {})
+        cols.setdefault(m.color, [])
+        if m.dest_line != FLOOR:
+            cols[m.color].append(m.dest_line)
+
+    lines = [
+        "Your move — type <source><color><row>",
+        "  source: 0-4 or c (center) · color: b y r k w · row: 0-4 or f (floor)",
+    ]
+    for s in ordered_sources(moves):
+        code = "c" if s == CENTER else str(s)
+        marker = (" +marker" if s == CENTER
+                  and state.first_player_marker_in_center else "")
+        specs = []
+        for col, rows in sorted(by_src[s].items()):
+            rows = sorted(set(rows))
+            spec = _compress_rows(rows) if rows else "f"
+            specs.append(f"{_tile_inline(col, uc)}:{spec}")
+        lines.append(f"  {code}  " + "   ".join(specs) + marker)
+    return "\n".join(lines)

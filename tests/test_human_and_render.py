@@ -4,9 +4,8 @@ import random
 from azul.agent import HumanAgent, RandomAgent
 from azul.game import Game
 from azul.render import (
-    render, render_move, render_board, organize_moves,
-    ordered_sources, render_source_menu, render_placement_menu,
-    parse_move_shortcut,
+    render, render_move, render_board,
+    ordered_sources, render_move_guide, parse_move_shortcut, _compress_rows,
 )
 from azul.state import Color, GameState, Move, WALL_PATTERN, CENTER, FLOOR
 
@@ -43,50 +42,6 @@ def test_render_move_readable():
 # HumanAgent with injected I/O
 # ---------------------------------------------------------------------------
 
-def _src_primary(gs, source_pick):
-    """Helper: the primary placements for the source at index `source_pick`."""
-    moves = gs.legal_moves()
-    sources = ordered_sources(moves)
-    source = sources[source_pick]
-    src_moves = [m for m in moves if m.source == source]
-    primary, optional_floor, _ = render_placement_menu(src_moves)
-    return primary, optional_floor
-
-
-def test_human_agent_two_step_selection():
-    gs = GameState.new_game(42)
-    # Pick source 0, then placement 0.
-    answers = iter(["0", "0"])
-    outputs = []
-    agent = HumanAgent(input_fn=lambda _: next(answers), output_fn=outputs.append)
-    move = agent.choose_move(gs)
-    primary, _ = _src_primary(gs, 0)
-    assert move == primary[0]
-    assert any("Take tiles from" in o for o in outputs)
-
-
-def test_human_agent_retries_on_bad_input():
-    gs = GameState.new_game(42)
-    # source "0", then a bad placement, then placement "1".
-    answers = iter(["0", "nonsense", "1"])
-    outputs = []
-    agent = HumanAgent(input_fn=lambda _: next(answers), output_fn=outputs.append)
-    move = agent.choose_move(gs)
-    primary, _ = _src_primary(gs, 0)
-    assert move == primary[1]
-
-
-def test_human_agent_back_navigation():
-    gs = GameState.new_game(42)
-    # Enter source 1, back out ('b'), then source 0 placement 0.
-    answers = iter(["1", "b", "0", "0"])
-    outputs = []
-    agent = HumanAgent(input_fn=lambda _: next(answers), output_fn=outputs.append)
-    move = agent.choose_move(gs)
-    primary, _ = _src_primary(gs, 0)
-    assert move == primary[0]
-
-
 def test_parse_move_shortcut_factory():
     assert parse_move_shortcut("0y2") == Move(0, Color.YELLOW, 2)
     assert parse_move_shortcut("3k4") == Move(3, Color.BLACK, 4)
@@ -117,56 +72,36 @@ def test_human_agent_accepts_legal_shortcut():
     assert agent.choose_move(gs) == target
 
 
-def test_human_agent_rejects_illegal_shortcut_then_falls_back():
+def test_human_agent_reprompts_on_bad_format_then_illegal():
     gs = GameState.new_game(42)
-    # Factory 0 has no yellow, so '0y2' is illegal -> error -> two-step 0,0.
-    answers = iter(["0y2", "0", "0"])
+    # garbage -> illegal (factory 0 has no yellow) -> legal shortcut.
+    answers = iter(["nonsense", "0y2", "0b0"])
     outputs = []
     agent = HumanAgent(input_fn=lambda _: next(answers), output_fn=outputs.append)
     move = agent.choose_move(gs)
-    primary, _ = _src_primary(gs, 0)
-    assert move == primary[0]
+    assert move == Move(0, Color.BLUE, 0)
+    assert any("Format" in o for o in outputs)
     assert any("Not a legal move" in o for o in outputs)
 
 
-def test_human_agent_f_opens_floor_submenu():
+def test_human_agent_shows_move_guide():
     gs = GameState.new_game(42)
-    # source 0, then 'f', then floor option 0.
-    answers = iter(["0", "f", "0"])
     outputs = []
-    agent = HumanAgent(input_fn=lambda _: next(answers), output_fn=outputs.append)
-    move = agent.choose_move(gs)
-    _, optional_floor = _src_primary(gs, 0)
-    assert move == optional_floor[0]
-    assert move.dest_line == FLOOR
+    agent = HumanAgent(input_fn=lambda _: "0b0", output_fn=outputs.append)
+    agent.choose_move(gs)
+    text = "\n".join(outputs)
+    assert "<source><color><row>" in text
 
 
 # ---------------------------------------------------------------------------
-# organize_moves
+# move guide
 # ---------------------------------------------------------------------------
 
-def test_organize_hides_optional_floor_dumps():
-    gs = GameState.new_game(42)
-    moves = gs.legal_moves()
-    primary, optional_floor = organize_moves(moves)
-    # On a fresh board every color has a valid line, so all floor dumps are optional.
-    assert all(m.dest_line != FLOOR for m in primary)
-    assert all(m.dest_line == FLOOR for m in optional_floor)
-    assert optional_floor  # there are some
-
-
-def test_organize_keeps_forced_floor_in_primary():
-    gs = GameState()
-    gs.center = {Color.BLUE: 2}
-    board = gs.player_boards[0]
-    # Block blue on every pattern line by filling its wall slot.
-    for row in range(5):
-        col = next(c for c in range(5) if WALL_PATTERN[row][c] == Color.BLUE)
-        board.wall[row][col] = Color.BLUE
-    primary, optional_floor = organize_moves(gs.legal_moves())
-    # Blue's only option is the floor — it must be forced into primary.
-    assert Move(CENTER, Color.BLUE, FLOOR) in primary
-    assert optional_floor == []
+def test_compress_rows():
+    assert _compress_rows([0, 1, 2, 3, 4]) == "0-4"
+    assert _compress_rows([0, 2, 3, 4]) == "0,2-4"
+    assert _compress_rows([1]) == "1"
+    assert _compress_rows([]) == ""
 
 
 def test_ordered_sources_factories_then_center():
@@ -179,25 +114,48 @@ def test_ordered_sources_factories_then_center():
     assert srcs[:-1] == sorted(srcs[:-1])  # factories ascending
 
 
-def test_render_source_menu_lists_sources():
+def test_move_guide_uses_source_codes_not_indices():
     gs = GameState.new_game(42)
-    sources = ordered_sources(gs.legal_moves())
-    text = render_source_menu(gs, sources)
-    assert "Take tiles from" in text
-    assert "Factory 0" in text
+    text = render_move_guide(gs, gs.legal_moves(), color=False)
+    assert "<source><color><row>" in text
+    # Source codes are the factory numbers themselves (0..4), not [n] indices.
+    assert "[0]" not in text
+    # A factory line starts with its own number.
+    assert any(line.strip().startswith("0") for line in text.splitlines())
 
 
-def test_render_placement_menu_for_single_source():
-    gs = GameState.new_game(42)
-    src_moves = [m for m in gs.legal_moves() if m.source == 0]
-    primary, optional_floor, text = render_placement_menu(src_moves)
-    assert all(m.source == 0 for m in primary)
-    assert "row" in text
+def test_move_guide_marks_forced_floor():
+    gs = GameState()
+    gs.center = {Color.BLUE: 2}
+    board = gs.player_boards[0]
+    for row in range(5):
+        col = next(c for c in range(5) if WALL_PATTERN[row][c] == Color.BLUE)
+        board.wall[row][col] = Color.BLUE
+    text = render_move_guide(gs, gs.legal_moves(), color=False)
+    # Blue has no open rows -> shown as floor-only.
+    assert "B:f" in text
 
 
 def test_human_agent_drives_a_game():
-    """A HumanAgent that always picks move 0 can complete a game."""
-    human = HumanAgent(input_fn=lambda _: "0", output_fn=lambda _: None)
+    """A HumanAgent fed a legal shortcut each turn completes a game."""
+    from azul.render import GLYPH
+
+    holder = {}
+
+    def input_fn(_):
+        m = holder["moves"][0]
+        src = "c" if m.source == CENTER else str(m.source)
+        row = "f" if m.dest_line == FLOOR else str(m.dest_line)
+        return f"{src}{GLYPH[m.color].lower()}{row}"
+
+    human = HumanAgent(input_fn=input_fn, output_fn=lambda _: None)
+    orig = human.choose_move
+
+    def choose(state):           # stash this turn's legal moves for input_fn
+        holder["moves"] = state.legal_moves()
+        return orig(state)
+
+    human.choose_move = choose
     game = Game(agents=[human, RandomAgent(random.Random(5))], seed=3)
     result = game.play()
     assert game.over
