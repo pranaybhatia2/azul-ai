@@ -8,6 +8,7 @@ from the I/O loop.
 from __future__ import annotations
 
 import sys
+from typing import Optional
 
 from azul.state import (
     Color, GameState, Move, PATTERN_LINE_CAPACITY, WALL_PATTERN, CENTER, FLOOR,
@@ -20,6 +21,9 @@ GLYPH = {
     Color.BLACK: "K",
     Color.WHITE: "W",
 }
+# Reverse of GLYPH (lowercase) for parsing the move shortcut.
+CHAR_TO_COLOR = {"b": Color.BLUE, "y": Color.YELLOW, "r": Color.RED,
+                 "k": Color.BLACK, "w": Color.WHITE}
 
 # (background, foreground) ANSI codes for a filled tile of each color.
 _BG = {Color.BLUE: 44, Color.YELLOW: 43, Color.RED: 41, Color.BLACK: 100, Color.WHITE: 47}
@@ -174,6 +178,40 @@ def render_source_menu(state: GameState, sources: list[int], color=None) -> str:
                  if s == CENTER and state.first_player_marker_in_center else "")
         lines.append(f"  [{i}] {_source_label(s)}: {_pool_str(pool, uc)}{extra}")
     return "\n".join(lines)
+
+
+def parse_move_shortcut(text: str) -> Optional[Move]:
+    """Parse a one-shot move string '<source><color><row>', e.g. '0y2'
+    (factory 0, yellow, row 2) or 'crf' (center, red, floor). Source is a
+    digit 0-4 or 'c'; color is b/y/r/k/w; row is a digit 0-4 or 'f'.
+
+    Returns a syntactically-valid Move (legality is the caller's job), or None
+    if the string isn't in shortcut form.
+    """
+    t = text.replace(" ", "").lower()
+    if len(t) != 3:
+        return None
+    s, col, r = t[0], t[1], t[2]
+
+    if s == "c":
+        source = CENTER
+    elif s.isdigit():
+        source = int(s)
+    else:
+        return None
+
+    if col not in CHAR_TO_COLOR:
+        return None
+    color = CHAR_TO_COLOR[col]
+
+    if r == "f":
+        dest = FLOOR
+    elif r.isdigit():
+        dest = int(r)
+    else:
+        return None
+
+    return Move(source, color, dest)
 
 
 def render_placement_menu(src_moves: list[Move]) -> tuple[list[Move], list[Move], str]:

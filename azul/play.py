@@ -30,9 +30,9 @@ def _make_opponent(name: str, seed: int):
         return GreedyAgent()
     if name == "mcts":
         from azul.mcts import MCTSAgent
-        # Tuned for interactive speed (~2-4s/move) while still strong.
-        return MCTSAgent(iterations=150, rng=random.Random(seed),
-                         rollout="greedy", rollout_depth=6)
+        # Strong config (beats Greedy ~8-0). ~5-8s/move — slower but tougher.
+        return MCTSAgent(iterations=600, rng=random.Random(seed),
+                         rollout="greedy", rollout_depth=8)
     raise ValueError(f"unknown opponent: {name}")
 
 

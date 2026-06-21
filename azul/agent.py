@@ -69,23 +69,47 @@ class HumanAgent(Agent):
         # Imported here to avoid a hard dependency for headless agents.
         from azul.render import (
             render, ordered_sources, render_source_menu, render_placement_menu,
+            parse_move_shortcut,
         )
 
         inp = self._input if self._input is not None else input
         out = self._output if self._output is not None else print
 
         moves = state.legal_moves()
+        legal = set(moves)
         out(render(state))
 
         while True:  # outer loop lets the player back out of a source
             sources = ordered_sources(moves)
             out(render_source_menu(state, sources))
-            source = self._read_index(inp, out, len(sources), "Choose source")
-            source = sources[source]
+            out("Shortcut: <source><color><row>, e.g. 0y2 or crf "
+                "(c=center, k=black, f=floor). Or pick a source number.")
 
+            # Step 1: a full shortcut returns immediately; a bare number picks
+            # a source for the two-step menu.
+            source = None
+            while source is None:
+                raw = inp(f"Move or source [0-{len(sources) - 1}]: ").strip().lower()
+                shortcut = parse_move_shortcut(raw)
+                if shortcut is not None:
+                    if shortcut in legal:
+                        return shortcut
+                    out("Not a legal move.")
+                    continue
+                try:
+                    idx = int(raw)
+                except (ValueError, TypeError):
+                    out("Enter a source number or a shortcut like 0y2.")
+                    continue
+                if 0 <= idx < len(sources):
+                    source = sources[idx]
+                else:
+                    out("Out of range.")
+
+            # Step 2: placements from the chosen source.
             src_moves = [m for m in moves if m.source == source]
             primary, optional_floor, menu = render_placement_menu(src_moves)
-            out(f"Place tiles (b = back to sources):")
+            out("Place tiles (b = back to sources):")
             out(menu)
             if optional_floor:
                 out("  [f] dump a color to the floor (penalty)")
@@ -94,19 +118,6 @@ class HumanAgent(Agent):
             if chosen is not None:
                 return chosen
             # chosen is None -> player typed 'b'; re-show source menu.
-
-    def _read_index(self, inp, out, n, prompt):
-        """Read a valid index in [0, n)."""
-        while True:
-            raw = inp(f"{prompt} [0-{n - 1}]: ").strip()
-            try:
-                idx = int(raw)
-            except (ValueError, TypeError):
-                out("Please enter a number.")
-                continue
-            if 0 <= idx < n:
-                return idx
-            out("Out of range.")
 
     def _read_placement(self, inp, out, primary, optional_floor):
         """Return chosen Move, or None if the player typed 'b' (go back)."""

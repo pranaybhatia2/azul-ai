@@ -6,6 +6,7 @@ from azul.game import Game
 from azul.render import (
     render, render_move, render_board, organize_moves,
     ordered_sources, render_source_menu, render_placement_menu,
+    parse_move_shortcut,
 )
 from azul.state import Color, GameState, Move, WALL_PATTERN, CENTER, FLOOR
 
@@ -84,6 +85,48 @@ def test_human_agent_back_navigation():
     move = agent.choose_move(gs)
     primary, _ = _src_primary(gs, 0)
     assert move == primary[0]
+
+
+def test_parse_move_shortcut_factory():
+    assert parse_move_shortcut("0y2") == Move(0, Color.YELLOW, 2)
+    assert parse_move_shortcut("3k4") == Move(3, Color.BLACK, 4)
+
+
+def test_parse_move_shortcut_center_and_floor():
+    assert parse_move_shortcut("crf") == Move(CENTER, Color.RED, FLOOR)
+    assert parse_move_shortcut("0bf") == Move(0, Color.BLUE, FLOOR)
+
+
+def test_parse_move_shortcut_tolerates_spaces_and_case():
+    assert parse_move_shortcut(" 0 Y 2 ") == Move(0, Color.YELLOW, 2)
+
+
+def test_parse_move_shortcut_rejects_garbage():
+    assert parse_move_shortcut("zz") is None      # too short
+    assert parse_move_shortcut("0z2") is None      # bad color
+    assert parse_move_shortcut("0y") is None       # too short
+    assert parse_move_shortcut("xy2") is None      # bad source
+
+
+def test_human_agent_accepts_legal_shortcut():
+    gs = GameState.new_game(42)
+    # Factory 1 has yellow (Yx3); yellow -> row 2 is legal on a fresh board.
+    target = Move(1, Color.YELLOW, 2)
+    assert target in gs.legal_moves()
+    agent = HumanAgent(input_fn=lambda _: "1y2", output_fn=lambda _: None)
+    assert agent.choose_move(gs) == target
+
+
+def test_human_agent_rejects_illegal_shortcut_then_falls_back():
+    gs = GameState.new_game(42)
+    # Factory 0 has no yellow, so '0y2' is illegal -> error -> two-step 0,0.
+    answers = iter(["0y2", "0", "0"])
+    outputs = []
+    agent = HumanAgent(input_fn=lambda _: next(answers), output_fn=outputs.append)
+    move = agent.choose_move(gs)
+    primary, _ = _src_primary(gs, 0)
+    assert move == primary[0]
+    assert any("Not a legal move" in o for o in outputs)
 
 
 def test_human_agent_f_opens_floor_submenu():
