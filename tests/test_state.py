@@ -116,7 +116,6 @@ def test_clone_bag_is_independent():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("method,args", [
-    ("legal_moves",         []),
     ("encode",              []),
 ])
 def test_stub_raises(method, args):

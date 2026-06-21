@@ -215,8 +215,43 @@ class GameState:
         self.current_player = 1 - self.current_player
 
     def legal_moves(self) -> list[Move]:
-        """Return all legal moves for the current player."""
-        raise NotImplementedError
+        """Return all legal moves for the current player, sorted by (source, color, dest)."""
+        board = self.player_boards[self.current_player]
+        moves: list[Move] = []
+
+        sources: list[tuple[int, dict[Color, int]]] = (
+            [(i, f) for i, f in enumerate(self.factories) if f]
+            + ([(CENTER, self.center)] if self.center else [])
+        )
+
+        for source, pool in sources:
+            for color, count in pool.items():
+                if count == 0:
+                    continue
+                valid_dests = [
+                    row for row in range(5)
+                    if self._can_place(board, row, color)
+                ]
+                # Floor is always valid
+                for dest in valid_dests:
+                    moves.append(Move(source, color, dest))
+                moves.append(Move(source, color, FLOOR))
+
+        moves.sort(key=lambda m: (m.source, m.color, m.dest_line))
+        return moves
+
+    @staticmethod
+    def _can_place(board: PlayerBoard, row: int, color: Color) -> bool:
+        """True if `color` can legally be staged on pattern line `row`."""
+        pl = board.pattern_lines[row]
+        if pl.count == PATTERN_LINE_CAPACITY[row]:
+            return False
+        if pl.color is not None and pl.color != color:
+            return False
+        col = next(c for c in range(5) if WALL_PATTERN[row][c] == color)
+        if board.wall[row][col] is not None:
+            return False
+        return True
 
     def refill_factories(self, rng) -> None:
         """Draw 4 tiles per factory from bag; reshuffle discard into bag if needed."""
