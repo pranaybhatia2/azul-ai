@@ -57,3 +57,24 @@ def test_beats_random():
         base_seed=0,
     )
     assert res.wins_a >= 2
+
+
+# --- greedy rollout policy ---
+
+def test_invalid_rollout_policy_raises():
+    import pytest
+    with pytest.raises(ValueError):
+        MCTSAgent(rollout="banana")
+
+
+def test_greedy_rollout_returns_legal_move():
+    gs = GameState.new_game(42)
+    move = MCTSAgent(iterations=20, rng=random.Random(0), rollout="greedy").choose_move(gs)
+    assert move in gs.legal_moves()
+
+
+def test_greedy_rollout_deterministic():
+    gs = GameState.new_game(42)
+    a = MCTSAgent(iterations=20, rng=random.Random(3), rollout="greedy").choose_move(gs)
+    b = MCTSAgent(iterations=20, rng=random.Random(3), rollout="greedy").choose_move(gs)
+    assert a == b

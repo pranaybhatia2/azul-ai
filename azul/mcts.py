@@ -48,10 +48,14 @@ class _Node:
 
 
 class MCTSAgent(Agent):
-    def __init__(self, iterations: int = 200, rng=None, c: float = SQRT2):
+    def __init__(self, iterations: int = 200, rng=None, c: float = SQRT2,
+                 rollout: str = "random"):
+        if rollout not in ("random", "greedy"):
+            raise ValueError("rollout must be 'random' or 'greedy'")
         self.iterations = iterations
         self.rng = rng if rng is not None else random.Random()
         self.c = c
+        self.rollout = rollout
 
     def choose_move(self, state: GameState) -> Move:
         root = _Node(state.clone(), parent=None, move=None)
@@ -105,11 +109,28 @@ class MCTSAgent(Agent):
         s = node.state.clone()
         while True:
             moves = s.legal_moves()
-            move = self.rng.choice(moves)
+            if self.rollout == "greedy":
+                move = self._greedy_move(s, moves)
+            else:
+                move = self.rng.choice(moves)
             s.apply(move)
             scores = advance_round_if_over(s, self.rng)
             if scores is not None:
                 return winner_of(scores)
+
+    def _greedy_move(self, state, moves):
+        """Best move for the side to move by one-ply evaluate() (same rule as
+        GreedyAgent). Makes rollouts realistic instead of random."""
+        from azul.heuristics import evaluate
+        me = state.current_player
+        best_move, best_val = None, float("-inf")
+        for move in moves:
+            nxt = state.clone()
+            nxt.apply(move)
+            val = evaluate(nxt, me)
+            if val > best_val:
+                best_val, best_move = val, move
+        return best_move
 
     def _backpropagate(self, node: _Node, winner: Optional[int]) -> None:
         while node is not None:
