@@ -117,7 +117,7 @@ def eval_vs(opponent: str, n_games: int, model: str, effort: str,
     tally = {"llm": 0, "opp": 0, "ties": 0, "fb_games": 0, "done": 0, "n": n_games}
 
     def run_game(i):
-        llm = LLMAgent(model=model, effort=effort, verbose=verbose)
+        llm = LLMAgent(model=model, effort=effort, top_k=TOP_K, verbose=verbose)
         opp = make_opponent(opponent, seed=1000 + i)
         llm_seat = i % 2  # alternate seats
         result, fb = play_one_game(
@@ -156,6 +156,9 @@ def main(argv=None) -> None:
     parser.add_argument("--effort", default=DEFAULT_EFFORT,
                         choices=["low", "medium", "high", "max"])
     parser.add_argument("--mcts-iterations", type=int, default=200)
+    parser.add_argument("--top-k", type=int, default=12,
+                        help="show the LLM only the top-k moves ranked by the "
+                        "Greedy evaluator (hybrid mode). 0 = show all moves.")
     parser.add_argument("--concurrency", type=int, default=1,
                         help="games to run in parallel (independent games; "
                         "calls are network-bound so this ~N-x's throughput). "
@@ -167,8 +170,9 @@ def main(argv=None) -> None:
     from azul.envfile import load_env
     load_env()  # pick up ANTHROPIC_API_KEY from a local .env
 
-    global MCTS_ITERATIONS
+    global MCTS_ITERATIONS, TOP_K
     MCTS_ITERATIONS = args.mcts_iterations
+    TOP_K = args.top_k if args.top_k > 0 else None  # 0 -> show all moves
 
     opponents = ["greedy", "mcts"] if args.opponent == "both" else [args.opponent]
     for opp in opponents:
