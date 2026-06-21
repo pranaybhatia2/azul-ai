@@ -283,7 +283,11 @@ class LLMAgent(Agent):
         if self._client is None:
             import anthropic
 
-            self._client = anthropic.Anthropic()
+            # Bounded per-request timeout so a slow/hung call fails fast and is
+            # retried, rather than blocking on the SDK's 10-min default — which
+            # otherwise stalls concurrent eval runs for tens of minutes. The SDK
+            # auto-retries timeouts and 429s with backoff.
+            self._client = anthropic.Anthropic(timeout=90.0, max_retries=4)
         resp = self._client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
