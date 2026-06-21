@@ -50,6 +50,10 @@ def main(argv: list[str] | None = None) -> None:
                         default="greedy")
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
+    if args.opponent == "llm":
+        from azul.envfile import load_env
+        load_env()  # pick up ANTHROPIC_API_KEY from a local .env
+
     seed = args.seed if args.seed is not None else args.seed_flag
     if seed is None:
         seed = random.randrange(1_000_000)
