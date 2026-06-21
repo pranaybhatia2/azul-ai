@@ -7,7 +7,7 @@ from azul.llm_agent import (
     _extract_move,
 )
 from azul.render import move_to_shortcut
-from azul.state import Color, GameState, Move, CENTER, FLOOR
+from azul.state import Color, GameState, Move, WALL_PATTERN, CENTER, FLOOR
 
 
 # --- move_to_shortcut <-> parse_move_shortcut round-trip --------------------
@@ -38,9 +38,33 @@ def test_describe_state_frames_current_player_and_lists_factories():
 def test_describe_legal_moves_includes_every_code():
     gs = GameState.new_game(42)
     moves = gs.legal_moves()
-    text = describe_legal_moves(moves)
+    text = describe_legal_moves(gs, moves)
     for m in moves:
         assert move_to_shortcut(m) in text
+
+
+def test_legal_move_annotations_flag_completion_and_bonus():
+    # 4 blue available, col 0 already at 4/5 -> taking blue to row 0 completes
+    # the line and finishes column 0 for +7. The annotation must say so.
+    gs = GameState()
+    gs.factories[0] = {Color.BLUE: 1}
+    b = gs.player_boards[0]
+    # Fill col 0 in rows 1-4 so row 0 (Blue at col 0) would complete the column.
+    for r in range(1, 5):
+        b.wall[r][0] = WALL_PATTERN[r][0]
+    text = describe_legal_moves(gs, gs.legal_moves())
+    line = next(ln for ln in text.splitlines() if ln.strip().startswith("0b0"))
+    assert "COMPLETES" in line
+    assert "+7" in line  # finishing column 0
+
+
+def test_legal_move_annotations_flag_overflow():
+    # 4 blue, row 0 holds 1 -> 3 overflow to floor; annotation must warn.
+    gs = GameState()
+    gs.factories[0] = {Color.BLUE: 4}
+    text = describe_legal_moves(gs, gs.legal_moves())
+    line = next(ln for ln in text.splitlines() if ln.strip().startswith("0b0"))
+    assert "overflow" in line.lower()
 
 
 # --- reply parsing ----------------------------------------------------------

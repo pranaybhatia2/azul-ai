@@ -84,11 +84,22 @@ single biggest swing — actively drive your near-complete columns to 5. Use the
 (+10), is worth chasing. The 5-tile bottom row and full color sets are hard in \
 a 2-player game (tiles usually don't recycle), so weigh them against easier \
 columns.
+- ORCHESTRATE THE WALL, don't just grab the easiest line each turn. The big \
+scores come from bonuses COMPOUNDING: aim to complete rows, columns, and color \
+sets together rather than one isolated line at a time. Prefer a placement that \
+advances a column AND a row you are already building. A common losing pattern is \
+to keep completing small lines for a few points each while the opponent quietly \
+assembles a wall that erupts for column/color bonuses in the final round — your \
+mid-game tempo means nothing if their end-game bonuses dwarf it.
 - DON'T SCATTER LATE. Placing single tiles across many different rows wastes \
 turns; concentrating tiles to actually COMPLETE a line — especially to finish a \
 column — is what scores. Late in the game, prefer the move that completes (or \
 directly sets up completing) a line or column over one that merely starts a new \
 line.
+- USE THE MOVE ANNOTATIONS. Each legal move is labeled with its computed effect \
+(overflow, whether it completes a line, the wall cell, adjacency points, and how \
+it advances each bonus). Read those numbers and choose strategically — do not \
+re-derive wall geometry or adjacency yourself; the annotations are authoritative.
 - The top rows (smaller pattern lines) complete fastest — the 1-tile row 0 is \
 the quickest path and watch for the opponent racing it to end the game early.
 - Only stage what you can finish: tiles left in a pattern line at game end score \
@@ -214,11 +225,70 @@ def describe_state(state: GameState) -> str:
     return "\n".join(parts)
 
 
-def describe_legal_moves(moves: list[Move]) -> str:
-    """List every legal move with its shortcut code and a readable description."""
-    lines = ["LEGAL MOVES (choose exactly one code):"]
+def _move_annotation(state: GameState, board, move: Move) -> str:
+    """Compute the mechanical consequence of `move` so the model doesn't have to
+    (and doesn't get it wrong): tiles taken, pattern-line fill / floor overflow,
+    and — if the move completes a line — the wall cell, the adjacency points it
+    would score against the current wall, and how it advances the column / row /
+    color toward their end-game bonuses."""
+    pool = state.center if move.source == CENTER else state.factories[move.source]
+    n = pool.get(move.color, 0)
+
+    if move.dest_line == FLOOR:
+        return f"takes {n}; all {n} -> FLOOR (penalty, no scoring)"
+
+    cap = PATTERN_LINE_CAPACITY[move.dest_line]
+    pl = board.pattern_lines[move.dest_line]
+    space = cap - pl.count
+    placed = min(n, space)
+    new_count = pl.count + placed
+    overflow = n - space
+
+    seg = f"takes {n}; row {move.dest_line}: {pl.count}/{cap}->{new_count}/{cap}"
+    if overflow > 0:
+        seg += f" ({overflow} overflow -> floor)"
+
+    if new_count != cap:
+        return seg + "  (does not complete)"
+
+    # Completes the line -> a tile lands on the wall this round end.
+    wall = board.wall
+    col = next(c for c in range(5) if WALL_PATTERN[move.dest_line][c] == move.color)
+    adj = GameState._adjacency_score(wall, move.dest_line, col)
+    col_n = sum(wall[r][col] is not None for r in range(5))
+    row_n = sum(wall[move.dest_line][c] is not None for c in range(5))
+    color_n = sum(
+        wall[r][c] == move.color for r in range(5) for c in range(5)
+    )
+
+    def prog(now, label, bonus):
+        s = f"{label} {now}/5->{now + 1}/5"
+        return s + (f" ({bonus}!)" if now + 1 == 5 else "")
+
+    bonus_bits = [
+        prog(col_n, f"col{col}", "+7"),
+        prog(row_n, f"row{move.dest_line}", "+2 ENDS GAME"),
+        prog(color_n, color_name(move.color), "+10"),
+    ]
+    return (
+        seg + f"  COMPLETES -> wall r{move.dest_line}c{col}, "
+        f"~{adj} adjacency pts now; " + ", ".join(bonus_bits)
+    )
+
+
+def describe_legal_moves(state: GameState, moves: list[Move]) -> str:
+    """List every legal move with its shortcut code, a readable description, and
+    a computed annotation of its consequence (see _move_annotation)."""
+    board = state.player_boards[state.current_player]
+    lines = [
+        "LEGAL MOVES (choose exactly one code). Each line is annotated with its "
+        "computed effect — trust these numbers instead of recomputing:",
+    ]
     for move in moves:
-        lines.append(f"  {move_to_shortcut(move)}  — {render_move(move)}")
+        lines.append(
+            f"  {move_to_shortcut(move)}  — {render_move(move)}  "
+            f"[{_move_annotation(state, board, move)}]"
+        )
     return "\n".join(lines)
 
 
@@ -307,7 +377,7 @@ class LLMAgent(Agent):
 
         complete = self._complete or self._default_complete
         user = (
-            f"{describe_state(state)}\n\n{describe_legal_moves(moves)}\n\n"
+            f"{describe_state(state)}\n\n{describe_legal_moves(state, moves)}\n\n"
             "Choose your move."
         )
         messages: list[dict] = [{"role": "user", "content": user}]
