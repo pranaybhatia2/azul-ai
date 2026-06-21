@@ -295,6 +295,28 @@ class GameState:
             idx -= self.bag[color]
         return None  # unreachable
 
+    def end_game_bonus(self) -> None:
+        """Apply end-of-game bonuses to both players. Call once at game end.
+
+        +2 per complete row, +7 per complete column, +10 per color
+        fully placed (all 5) on the wall.
+        """
+        for board in self.player_boards:
+            wall = board.wall
+            for row in range(5):
+                if all(wall[row][c] is not None for c in range(5)):
+                    board.score += 2
+            for col in range(5):
+                if all(wall[r][col] is not None for r in range(5)):
+                    board.score += 7
+            for color in Color:
+                placed = sum(
+                    1 for r in range(5) for c in range(5)
+                    if wall[r][c] == color
+                )
+                if placed == 5:
+                    board.score += 10
+
     def encode(self):
         """Return a compact numeric representation (Phase 4+)."""
         raise NotImplementedError
