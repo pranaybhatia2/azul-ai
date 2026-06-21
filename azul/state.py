@@ -109,8 +109,62 @@ class GameState:
     # ------------------------------------------------------------------
 
     def tile_wall_and_score(self) -> None:
-        """End-of-round: move complete pattern lines to wall, score adjacency."""
-        raise NotImplementedError
+        """End-of-round: move complete pattern lines to wall, score adjacency,
+        apply floor penalties, clear floors. Processes both players."""
+        for board in self.player_boards:
+            for row, pl in enumerate(board.pattern_lines):
+                capacity = PATTERN_LINE_CAPACITY[row]
+                if pl.count < capacity:
+                    continue
+
+                # Find which column this color belongs in for this row
+                col = next(
+                    c for c in range(5) if WALL_PATTERN[row][c] == pl.color
+                )
+                board.wall[row][col] = pl.color
+
+                # Extras go to discard (one tile was placed, rest discarded)
+                self.discard[pl.color] = self.discard.get(pl.color, 0) + (capacity - 1)
+
+                # Score adjacency
+                board.score += self._adjacency_score(board.wall, row, col)
+
+                # Clear pattern line
+                pl.color = None
+                pl.count = 0
+
+            # Floor penalty — marker counts as an extra floor tile
+            effective_floor = board.floor_count + (1 if board.has_first_player_marker else 0)
+            penalty = sum(FLOOR_PENALTIES[:min(effective_floor, len(FLOOR_PENALTIES))])
+            board.score = max(0, board.score + penalty)
+
+            board.floor_count = 0
+            board.has_first_player_marker = False
+
+    @staticmethod
+    def _adjacency_score(wall: list[list[Optional[Color]]], row: int, col: int) -> int:
+        """Score for placing a tile at (row, col) based on contiguous runs."""
+        def run_length(dr: int, dc: int) -> int:
+            length = 0
+            r, c = row + dr, col + dc
+            while 0 <= r < 5 and 0 <= c < 5 and wall[r][c] is not None:
+                length += 1
+                r += dr
+                c += dc
+            return length
+
+        h = run_length(0, -1) + 1 + run_length(0, 1)
+        v = run_length(-1, 0) + 1 + run_length(1, 0)
+
+        # Isolated tile: score 1. Otherwise score each run that has length > 1.
+        if h == 1 and v == 1:
+            return 1
+        score = 0
+        if h > 1:
+            score += h
+        if v > 1:
+            score += v
+        return score
 
     def is_round_over(self) -> bool:
         """True when all factories and the center pool are empty."""
