@@ -168,7 +168,7 @@ class GameState:
 
     def is_round_over(self) -> bool:
         """True when all factories and the center pool are empty."""
-        raise NotImplementedError
+        return all(not f for f in self.factories) and not self.center
 
     def is_game_over(self) -> bool:
         """True when any player has completed a full horizontal wall row."""
