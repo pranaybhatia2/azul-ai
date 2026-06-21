@@ -1,34 +1,55 @@
-"""Interactive CLI: play Azul as a human against the RandomAgent.
+"""Interactive CLI: play Azul as a human against a bot.
 
 Run:
-    python -m azul.play            # random seed
-    python -m azul.play 42         # fixed seed (reproducible)
+    python -m azul.play                      # vs Greedy, random seed
+    python -m azul.play --seed 42            # reproducible
+    python -m azul.play --opponent random    # vs RandomAgent
+    python -m azul.play 42 --opponent greedy # seed positional + opponent
 
-You are Player 0. The board is shown on your turn; the random agent's
-move is printed after it plays. Round scores and the final result are
-announced at the boundaries.
+You are Player 0. The board is shown on your turn; the opponent's move is
+printed after it plays. Round scores and the final result are announced.
 """
 from __future__ import annotations
 
+import argparse
 import random
 import sys
 
-from azul.agent import HumanAgent, RandomAgent
+from azul.agent import HumanAgent, RandomAgent, GreedyAgent
 from azul.game import Game
 from azul.render import render_move
 
 HUMAN_SEAT = 0
-RANDOM_SEAT = 1
+OPP_SEAT = 1
+
+
+def _make_opponent(name: str, seed: int):
+    if name == "random":
+        return RandomAgent(random.Random(seed))
+    if name == "greedy":
+        return GreedyAgent()
+    raise ValueError(f"unknown opponent: {name}")
 
 
 def main(argv: list[str] | None = None) -> None:
-    argv = sys.argv[1:] if argv is None else argv
-    seed = int(argv[0]) if argv else random.randrange(1_000_000)
-    print(f"=== Azul — you are Player {HUMAN_SEAT} vs RandomAgent (seed={seed}) ===\n")
+    parser = argparse.ArgumentParser(prog="azul.play")
+    parser.add_argument("seed", nargs="?", type=int, default=None,
+                        help="random seed (reproducible game)")
+    parser.add_argument("--seed", dest="seed_flag", type=int, default=None,
+                        help="random seed (alternative to positional)")
+    parser.add_argument("--opponent", choices=["greedy", "random"], default="greedy")
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+
+    seed = args.seed if args.seed is not None else args.seed_flag
+    if seed is None:
+        seed = random.randrange(1_000_000)
+
+    print(f"=== Azul — you are Player {HUMAN_SEAT} vs {args.opponent} "
+          f"(seed={seed}) ===\n")
 
     agents = [None, None]
     agents[HUMAN_SEAT] = HumanAgent()
-    agents[RANDOM_SEAT] = RandomAgent(random.Random(seed))
+    agents[OPP_SEAT] = _make_opponent(args.opponent, seed)
     game = Game(agents=agents, seed=seed)
 
     while not game.over:
@@ -37,10 +58,9 @@ def main(argv: list[str] | None = None) -> None:
 
         move = game.step()
 
-        if mover == RANDOM_SEAT:
-            print(f"\n>>> Player {RANDOM_SEAT} (random): {render_move(move)}\n")
+        if mover == OPP_SEAT:
+            print(f"\n>>> Player {OPP_SEAT} ({args.opponent}): {render_move(move)}\n")
 
-        # A round boundary (or game end) just happened inside step().
         if game.over:
             break
         if game.state.round_number != prev_round:
@@ -56,7 +76,7 @@ def main(argv: list[str] | None = None) -> None:
     elif r.winner == HUMAN_SEAT:
         print("Result: you win! 🎉")
     else:
-        print("Result: random agent wins.")
+        print(f"Result: {args.opponent} agent wins.")
     print(f"(rounds played: {r.rounds})")
 
 
