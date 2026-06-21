@@ -21,6 +21,7 @@ from typing import Optional
 from azul.agent import Agent
 from azul.game import advance_round_if_over, winner_of
 from azul.net import AzulNet, predict
+from azul.pruning import candidate_moves
 from azul.state import GameState, Move
 
 
@@ -104,7 +105,10 @@ class NeuralMCTSAgent(Agent):
         """Create all children with net priors; return the net value (for the
         player to move at `node`)."""
         priors, value = predict(self.net, node.state)
-        for move, p in priors.items():
+        # Only expand pruned candidates (drops dominated optional floor-dumps),
+        # using the net's prior for each.
+        for move in candidate_moves(node.state):
+            p = priors.get(move, 0.0)
             child_state = node.state.clone()
             child_state.apply(move)
             scores = advance_round_if_over(child_state, self.rng)

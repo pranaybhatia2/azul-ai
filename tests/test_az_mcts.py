@@ -20,12 +20,14 @@ def test_choose_move_returns_legal():
 
 
 def test_visits_sum_to_iterations():
+    from azul.pruning import candidate_moves
     net = AzulNet()
     gs = GameState.new_game(42)
     agent = NeuralMCTSAgent(net, iterations=40, rng=random.Random(0))
     visits = agent.search(gs)
     assert sum(visits.values()) == 40
-    assert set(visits.keys()) == set(gs.legal_moves())
+    # Root children are the pruned candidates (optional floor-dumps dropped).
+    assert set(visits.keys()) == set(candidate_moves(gs))
 
 
 def test_search_deterministic_without_noise():
