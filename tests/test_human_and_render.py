@@ -34,7 +34,7 @@ def test_render_board_shows_score():
 
 def test_render_move_readable():
     assert render_move(Move(CENTER, Color.RED, FLOOR)) == "take Red from center -> floor"
-    assert render_move(Move(2, Color.BLUE, 3)) == "take Blue from factory 2 -> line 3"
+    assert render_move(Move(2, Color.BLUE, 3)) == "take Blue from factory 2 -> row 3"
 
 
 # ---------------------------------------------------------------------------

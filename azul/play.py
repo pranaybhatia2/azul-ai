@@ -17,7 +17,7 @@ import sys
 
 from azul.agent import HumanAgent, RandomAgent, GreedyAgent
 from azul.game import Game
-from azul.render import render_move
+from azul.render import render, render_move
 
 HUMAN_SEAT = 0
 OPP_SEAT = 1
@@ -70,6 +70,8 @@ def main(argv: list[str] | None = None) -> None:
 
     r = game.result
     print("\n================ GAME OVER ================")
+    print("Final board (after end-of-game bonuses):\n")
+    print(render(game.state))
     print(f"Final: Player 0 = {r.scores[0]}   Player 1 = {r.scores[1]}")
     if r.winner is None:
         print("Result: tie")

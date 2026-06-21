@@ -124,7 +124,7 @@ def render(state: GameState, color=None) -> str:
 
 def render_move(move: Move) -> str:
     src = "center" if move.source == CENTER else f"factory {move.source}"
-    dest = "floor" if move.dest_line == FLOOR else f"line {move.dest_line}"
+    dest = "floor" if move.dest_line == FLOOR else f"row {move.dest_line}"
     return f"take {color_name(move.color)} from {src} -> {dest}"
 
 
@@ -167,6 +167,6 @@ def render_move_menu(moves: list[Move]) -> tuple[str, list[Move]]:
         if m.source != last_source:
             out_lines.append(f"  {_source_label(m.source)}:")
             last_source = m.source
-        dest = "floor (forced)" if m.dest_line == FLOOR else f"line {m.dest_line}"
+        dest = "floor (forced)" if m.dest_line == FLOOR else f"row {m.dest_line}"
         out_lines.append(f"    [{i}] {color_name(m.color)} -> {dest}")
     return "\n".join(out_lines), primary
