@@ -44,7 +44,8 @@ from azul.state import (
 # running message list ([{"role", "content"}, ...]), return the model's text.
 CompleteFn = Callable[[str, list[dict]], str]
 
-DEFAULT_MODEL = "claude-opus-4-8"
+DEFAULT_MODEL = "claude-sonnet-4-6"
+DEFAULT_EFFORT = "low"  # GA effort param; low = fast/cheap, fits a per-move call
 
 SYSTEM_PROMPT = """\
 You are an expert Azul player. You will be given the full state of a 2-player \
@@ -201,6 +202,7 @@ class LLMAgent(Agent):
         self,
         *,
         model: str = DEFAULT_MODEL,
+        effort: str = DEFAULT_EFFORT,
         client=None,
         complete: Optional[CompleteFn] = None,
         max_move_retries: int = 2,
@@ -209,7 +211,8 @@ class LLMAgent(Agent):
         verbose: bool = False,
     ):
         """Args:
-        model: Claude model id (default Opus 4.8).
+        model: Claude model id (default Sonnet 4.6).
+        effort: output_config effort — "low" (default) | "medium" | "high" | "max".
         client: an anthropic.Anthropic instance; created lazily if omitted.
         complete: override the network call entirely — (system, messages) -> text.
             Used by tests so no API key or network is needed.
@@ -219,6 +222,7 @@ class LLMAgent(Agent):
         verbose: print the model's raw reply per turn (debugging / watching play).
         """
         self.model = model
+        self.effort = effort
         self._client = client
         self._complete = complete
         self.max_move_retries = max_move_retries
@@ -238,6 +242,10 @@ class LLMAgent(Agent):
             model=self.model,
             max_tokens=self.max_tokens,
             system=system,
+            # Reasoning goes in the visible reply (brief, then MOVE:), so we run
+            # without extended thinking; effort tunes depth/cost (low by default).
+            thinking={"type": "disabled"},
+            output_config={"effort": self.effort},
             messages=messages,
         )
         return "".join(b.text for b in resp.content if b.type == "text")
