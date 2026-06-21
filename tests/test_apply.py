@@ -61,11 +61,14 @@ def test_first_player_marker_claimed_from_center():
     assert not gs.first_player_marker_in_center
 
 
-def test_first_player_marker_adds_floor_tile():
+def test_first_player_marker_not_added_to_floor_count():
+    # The marker is tracked by has_first_player_marker, not floor_count.
+    # Its penalty is applied at scoring time, so floor_count stays clean here.
     gs = make_gs()
     gs.first_player_marker_in_center = True
     gs.apply(Move(source=CENTER, color=Color.BLACK, dest_line=1))
-    assert gs.player_boards[0].floor_count >= 1
+    assert gs.player_boards[0].floor_count == 0
+    assert gs.player_boards[0].has_first_player_marker
 
 
 def test_no_marker_in_center_does_not_set_flag():

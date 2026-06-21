@@ -195,8 +195,10 @@ class GameState:
         if move.source == CENTER:
             count = self.center.pop(move.color, 0)
             if self.first_player_marker_in_center:
+                # The marker is tracked solely by has_first_player_marker.
+                # It contributes its floor penalty at scoring time (see
+                # tile_wall_and_score), so it is NOT added to floor_count here.
                 board.has_first_player_marker = True
-                board.floor_count += 1
                 self.first_player_marker_in_center = False
         else:
             factory = self.factories[move.source]
