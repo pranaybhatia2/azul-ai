@@ -22,13 +22,24 @@ A 2-player implementation of the board game Azul, with progressively smarter AI 
 | 5 | MCTS + UCB | Monte Carlo, exploration/exploitation |
 | 6 | Self-play NN (AlphaZero-lite) | RL, policy/value networks, self-play |
 | 7 | Evaluation harness | Tournaments, reproducibility |
-Currently: **Phase 3** (Phases 1 & 2 complete)
+Currently: **Phase 5** (Phases 1–4 complete)
 
 - Phase 1: engine complete — state, scoring, move gen, refill, new_game. All TDD'd.
 - Phase 2: `Agent` ABC, `end_game_bonus()`, `Game` loop (`play()`/`step()`),
   `RandomAgent`, `HumanAgent`, text `render()`. Loop handles two game-ending
   conditions: completed wall row, and tile starvation (bag+discard exhausted).
   Agents receive a `clone()` of the state (safe, optimize later).
+- Phase 3: `evaluate()` heuristic (azul/heuristics.py), `GreedyAgent`,
+  `play_match` harness (azul/match.py). Greedy beats Random 100/100.
+- Phase 4: `encode()` (TT key), `MinimaxAgent` (azul/minimax.py) — alpha-beta,
+  round-end horizon (no expansion past the stochastic refill), relative
+  zero-sum leaf eval, greedy move ordering, flagged transposition table.
+  Minimax(d2) beats Greedy 8-0.
+  **Measured finding:** deepcopy `clone()` is ~94% of search time, and the TT
+  gets ~0 hits — transpositions are rare in Azul (moves consume specific tiles
+  + players alternate, so positions diverge). So Zobrist (planned for Phase 4)
+  was DEFERRED: it speeds the TT key, but the TT barely helps here. The real
+  bottleneck is `clone()`. Both clone-perf and Zobrist are deferred, not done.
 ---
 ## State representation decisions
 These were made deliberately — don't change without discussion.
