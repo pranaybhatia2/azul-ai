@@ -112,14 +112,3 @@ def test_clone_bag_is_independent():
 
 
 # ---------------------------------------------------------------------------
-# Stubs raise NotImplementedError
-# ---------------------------------------------------------------------------
-
-@pytest.mark.parametrize("method,args", [
-    ("encode",              []),
-])
-def test_stub_raises(method, args):
-    gs = GameState()
-    with pytest.raises(NotImplementedError):
-        getattr(gs, method)(*args)
-

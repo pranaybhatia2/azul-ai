@@ -318,5 +318,25 @@ class GameState:
                     board.score += 10
 
     def encode(self):
-        """Return a compact numeric representation (Phase 4+)."""
-        raise NotImplementedError
+        """Return a canonical, hashable representation of the full state.
+
+        Used as a transposition-table key: two states that are identical in
+        every relevant field encode equal, so a search can recognise a
+        position reached by a different move order and reuse its result.
+        Factory order is treated as significant (positional), not sorted.
+        """
+        def pool(d: dict[Color, int]) -> tuple[int, ...]:
+            return tuple(d.get(c, 0) for c in Color)
+
+        def board_key(b: PlayerBoard) -> tuple:
+            lines = tuple((pl.color, pl.count) for pl in b.pattern_lines)
+            wall = tuple(tuple(b.wall[r][c] for c in range(5)) for r in range(5))
+            return (lines, wall, b.floor_count, b.has_first_player_marker, b.score)
+
+        return (
+            tuple(pool(f) for f in self.factories),
+            pool(self.center),
+            tuple(board_key(b) for b in self.player_boards),
+            self.current_player,
+            self.first_player_marker_in_center,
+        )
