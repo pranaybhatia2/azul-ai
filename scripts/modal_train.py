@@ -1,23 +1,20 @@
-"""Cloud-scale AlphaZero self-play for Azul on Modal.
+"""Cloud-scale AlphaZero self-play for Azul on Modal (deployed fan-out).
 
-This workload is CPU-bound (tiny net, Python game logic), so Modal's win is
-FAN-OUT: many CPU containers generating self-play games in parallel, far more
-than one machine's cores. A GPU isn't needed — the net is tiny.
+Robust launch (survives client disconnect because a DEPLOYED app is persistent
+server-side; an ephemeral `modal run` app is not):
 
-Run (needs a Modal account: `pip install modal` then `modal token new`):
+    modal deploy scripts/modal_train.py
+    python -c "import modal; modal.Function.from_name('azul-az','run_training').spawn(10,30,2,800,4,128)"
+    # args: iterations, tasks, games_per_task, sp_iters, epochs, batch
 
-    modal run scripts/modal_train.py \
-        --iterations 20 --tasks 50 --games-per-task 2 --sp-iters 800
+Self-play is fanned out via Modal containers (generate.starmap) — Modal's own
+parallelism, not in-container multiprocessing. Progress + results stream to the
+`azul-checkpoints` Volume:
 
-It runs entirely in the cloud and writes checkpoints + a metrics log to the
-`azul-checkpoints` Volume. Fetch them with:
-
-    modal volume get azul-checkpoints azul_net.pt .
     modal volume get azul-checkpoints metrics.txt .
+    modal volume get azul-checkpoints azul_net.pt .
 
-Strategy: start from a warm (Greedy-distilled) net, then high-sim self-play
-refinement at a scale that's infeasible on a laptop — the genuine path to a
-net that surpasses Greedy.
+Resumes from the checkpoint if present.
 """
 import io
 
@@ -35,7 +32,6 @@ CKPT_DIR = "/ckpt"
 HIDDEN = 512
 
 
-# --- self-play worker: one container generates a few games ---
 @app.function(image=image, cpu=4.0, timeout=3600)
 def generate(weights: bytes, n_games: int, sp_iters: int, seed: int):
     import random
@@ -55,12 +51,17 @@ def generate(weights: bytes, n_games: int, sp_iters: int, seed: int):
     return examples
 
 
-# --- orchestrator: fans out self-play, trains, evaluates, checkpoints ---
-@app.function(image=image, cpu=8.0, timeout=86400, volumes={CKPT_DIR: vol})
+@app.function(image=image, cpu=4.0, timeout=86400, volumes={CKPT_DIR: vol})
 def run_training(iterations: int, tasks: int, games_per_task: int,
-                 sp_iters: int, epochs: int, batch: int):
+                 sp_iters: int, epochs: int, batch: int,
+                 buffer_iters: int = 6, eval_games: int = 24, fresh: bool = False):
+    """AlphaZero loop with a REPLAY BUFFER: each iteration trains on the last
+    `buffer_iters` iterations' games (not just the newest), which prevents the
+    forgetting/oscillation seen when training on one iteration at a time.
+    `fresh=True` ignores any checkpoint and starts from a warm-started net."""
     import os
     import random
+    from collections import deque
     import torch
     from azul.net import AzulNet
     from azul.train import train_step
@@ -71,58 +72,73 @@ def run_training(iterations: int, tasks: int, games_per_task: int,
     rng = random.Random(0)
     ckpt = os.path.join(CKPT_DIR, "azul_net.pt")
     log_path = os.path.join(CKPT_DIR, "metrics.txt")
+    log = []
+
+    def flush():
+        with open(log_path, "w") as f:
+            f.write("\n".join(log) + "\n")
+        vol.commit()
 
     net = AzulNet(hidden=HIDDEN)
-    if os.path.exists(ckpt):
+    if os.path.exists(ckpt) and not fresh:
         net.load_state_dict(torch.load(ckpt, map_location="cpu"))
-        log = ["resumed from checkpoint"]
+        log.append("resumed from checkpoint")
     else:
-        log = ["warm-start (distill Greedy)"]
+        log.append("warm-start (distill Greedy)...")
+        flush()
         warm_start(net, n_games=80, epochs=10, rng=rng)
+    log.append(f"replay buffer = last {buffer_iters} iters, eval = {eval_games} games")
+    flush()
 
     opt = torch.optim.Adam(net.parameters(), lr=1e-3, weight_decay=1e-4)
+    buffer = deque(maxlen=buffer_iters)   # each entry = one iteration's examples
 
-    def vs(name, make_opp, n, iters, seed):
-        r = nn_match(net, make_opp, n_games=n, iterations=iters, agent_seed=seed)
-        line = f"  vs {name}: {r.wins_a}-{r.wins_b}-{r.ties} ({r.win_rate_a:.0%})"
-        log.append(line)
+    def vs(name, make_opp, n, sims, seed):
+        r = nn_match(net, make_opp, n_games=n, iterations=sims, agent_seed=seed)
+        log.append(f"  vs {name}: {r.wins_a}-{r.wins_b}-{r.ties} ({r.win_rate_a:.0%})")
         return r.win_rate_a
 
+    n_games = tasks * games_per_task
     for it in range(iterations):
+        log.append(f"iter {it}: generating {n_games} games @ {sp_iters} sims...")
+        flush()
+
         buf = io.BytesIO()
         torch.save(net.state_dict(), buf)
         w = buf.getvalue()
         args = [(w, games_per_task, sp_iters, it * 1_000_000 + i)
                 for i in range(tasks)]
-        examples = [e for chunk in generate.starmap(args) for e in chunk]
+        new_examples = [e for chunk in generate.starmap(args) for e in chunk]
+        buffer.append(new_examples)
+        train_data = [e for it_ex in buffer for e in it_ex]   # replay buffer
 
+        log[-1] = (f"iter {it}: +{len(new_examples)} new, "
+                   f"training on {len(train_data)} (buffer)...")
+        flush()
         for _ in range(epochs):
-            rng.shuffle(examples)
-            for i in range(0, len(examples), batch):
-                b = examples[i:i + batch]
+            rng.shuffle(train_data)
+            for i in range(0, len(train_data), batch):
+                b = train_data[i:i + batch]
                 if b:
                     train_step(net, opt, b)
 
-        log.append(f"iter {it}: {len(examples)} examples")
-        vs("Greedy", lambda i: GreedyAgent(), 12, 200, it + 1)
-
+        log[-1] = f"iter {it}: +{len(new_examples)} new, buffer {len(train_data)}"
+        vs("Greedy", lambda i: GreedyAgent(), eval_games, 200, it + 1)
         torch.save(net.state_dict(), ckpt)
-        with open(log_path, "w") as f:
-            f.write("\n".join(log) + "\n")
-        vol.commit()
+        flush()
 
     log.append("=== final ===")
-    vs("Random", lambda i: RandomAgent(random.Random(i)), 16, 200, 999)
-    vs("Greedy", lambda i: GreedyAgent(), 24, 400, 1000)
-    with open(log_path, "w") as f:
-        f.write("\n".join(log) + "\n")
-    vol.commit()
+    vs("Random", lambda i: RandomAgent(random.Random(i)), 24, 200, 999)
+    vs("Greedy", lambda i: GreedyAgent(), 40, 400, 1000)
+    flush()
     return "\n".join(log)
 
 
 @app.local_entrypoint()
-def main(iterations: int = 20, tasks: int = 50, games_per_task: int = 2,
-         sp_iters: int = 800, epochs: int = 4, batch: int = 128):
-    result = run_training.remote(iterations, tasks, games_per_task,
-                                 sp_iters, epochs, batch)
-    print(result)
+def main(iterations: int = 12, tasks: int = 30, games_per_task: int = 2,
+         sp_iters: int = 800, epochs: int = 4, batch: int = 128,
+         fresh: bool = True):
+    # For ad-hoc ephemeral runs. For a durable run, use `modal deploy` + spawn
+    # (see module docstring) so it survives this client disconnecting.
+    print(run_training.remote(iterations, tasks, games_per_task, sp_iters,
+                              epochs, batch, fresh=fresh))
