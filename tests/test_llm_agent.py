@@ -144,7 +144,7 @@ def test_imminent_completions_lists_opponent_threat():
 
 def test_describe_state_surfaces_opponent_threats():
     gs = _blocking_position()
-    assert "OPPONENT IMMINENT THREATS" in describe_state(gs)
+    assert "OPPONENT THREATS" in describe_state(gs)
 
 
 def test_opponent_aware_is_the_default():

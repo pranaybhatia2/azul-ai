@@ -231,16 +231,18 @@ def describe_state(state: GameState) -> str:
     threats = _imminent_completions(state, opp)
     if threats:
         parts.append("")
-        parts.append("OPPONENT IMMINENT THREATS (lines they could complete now "
-                     "with available tiles — consider taking those tiles to block):")
+        parts.append("OPPONENT THREATS (lines they are developing whose tiles are "
+                     "still available — taking those tiles blocks them; ✓ = they "
+                     "could finish it right now):")
         parts.extend(f"  {t}" for t in threats)
     return "\n".join(parts)
 
 
 def _imminent_completions(state: GameState, player: int) -> list[str]:
-    """Partial pattern lines `player` could finish THIS turn given the tiles
-    currently available, with how much wall score that completion would lock in.
-    Surfaces blocking opportunities for the opponent of `player`."""
+    """Partial pattern lines `player` is developing whose color is still
+    available — both finishable-now lines and near-complete ones (within 2 of
+    the end), with the wall score completing would lock in. Surfaces blocking
+    opportunities for the opponent of `player`, biggest threat first."""
     board = state.player_boards[player]
     avail = {c: 0 for c in Color}
     for factory in state.factories:
@@ -248,7 +250,7 @@ def _imminent_completions(state: GameState, player: int) -> list[str]:
             avail[c] += n
     for c, n in state.center.items():
         avail[c] += n
-    out = []
+    rows = []
     for row, pl in enumerate(board.pattern_lines):
         cap = PATTERN_LINE_CAPACITY[row]
         if pl.color is None or not (0 < pl.count < cap):
@@ -257,11 +259,18 @@ def _imminent_completions(state: GameState, player: int) -> list[str]:
         if board.wall[row][col] is not None:
             continue
         needed = cap - pl.count
-        if avail[pl.color] >= needed:
-            pts = GameState._adjacency_score(board.wall, row, col)
-            out.append(f"row {row}: {pl.count}/{cap} {color_name(pl.color)} — "
-                       f"needs {needed}, {avail[pl.color]} available "
-                       f"→ would score ~{pts}")
+        # Show developing lines that are close (<=2 away) AND have tiles to grab.
+        if avail[pl.color] == 0 or needed > 2:
+            continue
+        pts = GameState._adjacency_score(board.wall, row, col)
+        finishable = avail[pl.color] >= needed
+        rows.append((needed, -pts, finishable, row, pl.count, cap, pl.color, avail[pl.color]))
+    rows.sort()  # nearest-to-done, then highest-scoring, first
+    out = []
+    for needed, negpts, finishable, row, count, cap, color, navail in rows:
+        mark = "✓ " if finishable else ""
+        out.append(f"{mark}row {row}: {count}/{cap} {color_name(color)} — "
+                   f"needs {needed}, {navail} available → ~{-negpts} pts")
     return out
 
 

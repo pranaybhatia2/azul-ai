@@ -94,10 +94,16 @@ def threat_score(state: GameState, player: int) -> float:
             continue  # that color is already walled in this row — dead line
         needed = cap - pl.count
         comp_val = GameState._adjacency_score(wall, row, col)
+        # Broadened: credit any developing line whose color is still available,
+        # not just ones finishable this turn — closer-to-done lines count more
+        # (proximity) and lines they can fully reach count fully (reach). This
+        # surfaces 2-away blocking opportunities, not only last-tile ones.
+        proximity = pl.count / cap
+        reach = min(avail[pl.color], needed) / needed
         if avail[pl.color] >= needed:
-            total += comp_val                                  # finishable now
-        elif avail[pl.color] > 0:
-            total += comp_val * avail[pl.color] / needed       # partial reach
+            total += comp_val * (0.5 + 0.5 * proximity)        # finishable: near-full
+        else:
+            total += comp_val * proximity * reach              # developing: partial
     return total
 
 
