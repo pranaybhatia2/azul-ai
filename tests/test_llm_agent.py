@@ -6,6 +6,8 @@ from azul.llm_agent import (
     describe_legal_moves,
     describe_state,
     rank_moves,
+    _denial_note,
+    _imminent_completions,
     _extract_move,
 )
 from azul.render import move_to_shortcut
@@ -92,6 +94,61 @@ def test_legal_move_annotations_flag_overflow():
     text = describe_legal_moves(gs, gs.legal_moves())
     line = next(ln for ln in text.splitlines() if ln.strip().startswith("0b0"))
     assert "overflow" in line.lower()
+
+
+# --- opponent-aware ranking / denial ----------------------------------------
+
+def _blocking_position():
+    """P0 to move. Opponent (P1) is one RED from completing row 4 for ~5 pts;
+    the only RED is in factory 0. P0's RED wall cells are filled so RED can only
+    go to the floor — making the block a pure denial (bad for P0's own board)."""
+    gs = GameState()
+    gs.current_player = 0
+    gs.factories[0] = {Color.RED: 1, Color.BLUE: 2}
+    opp = gs.player_boards[1]
+    opp.pattern_lines[4].color, opp.pattern_lines[4].count = Color.RED, 4
+    for r in range(4):
+        opp.wall[r][1] = WALL_PATTERN[r][1]   # vertical run -> completion worth ~5
+    me = gs.player_boards[0]
+    for r in range(5):
+        me.wall[r][(r + 2) % 5] = Color.RED   # RED only placeable on the floor
+    return gs
+
+
+def _took_red(move):
+    return move.source == 0 and move.color == Color.RED
+
+
+def test_opponent_aware_ranking_surfaces_the_block():
+    gs = _blocking_position()
+    plain_top = rank_moves(gs, opponent_aware=False)[0][0]
+    oa_top = rank_moves(gs, opponent_aware=True)[0][0]
+    assert not _took_red(plain_top)   # self-only ranking ignores the block
+    assert _took_red(oa_top)          # opponent-aware ranking blocks
+
+
+def test_denial_note_flags_blocking_move():
+    gs = _blocking_position()
+    block = next(m for m in gs.legal_moves() if _took_red(m))
+    own = next(m for m in gs.legal_moves()
+               if m.color == Color.BLUE and m.dest_line == 1)
+    assert "DENIES" in _denial_note(gs, block)
+    assert _denial_note(gs, own) == ""   # taking blue denies nothing
+
+
+def test_imminent_completions_lists_opponent_threat():
+    gs = _blocking_position()
+    threats = _imminent_completions(gs, 1)
+    assert len(threats) == 1 and "row 4" in threats[0] and "Red" in threats[0]
+
+
+def test_describe_state_surfaces_opponent_threats():
+    gs = _blocking_position()
+    assert "OPPONENT IMMINENT THREATS" in describe_state(gs)
+
+
+def test_opponent_aware_is_the_default():
+    assert LLMAgent(complete=lambda s, m: "x").opponent_aware is True
 
 
 # --- reply parsing ----------------------------------------------------------

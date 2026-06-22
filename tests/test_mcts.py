@@ -32,6 +32,17 @@ def test_deterministic_with_seeded_rng():
     assert a == b
 
 
+def test_threat_aware_agent_returns_a_legal_move():
+    # Threat-aware leaf eval (truncated greedy rollouts) still produces a legal
+    # move and uses the threat-aware value function.
+    from azul.heuristics import threat_aware_evaluate
+    gs = GameState.new_game(42)
+    agent = MCTSAgent(iterations=40, rng=random.Random(0),
+                      rollout="greedy", rollout_depth=6, threat_aware=True)
+    assert agent._leaf_value is threat_aware_evaluate
+    assert agent.choose_move(gs) in gs.legal_moves()
+
+
 def test_root_visits_equal_iterations():
     # Each iteration walks through exactly one root child, so the children's
     # visit counts sum to the iteration budget.

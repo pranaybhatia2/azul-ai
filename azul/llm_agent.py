@@ -113,7 +113,13 @@ row. If you are ahead on the board but behind on pending end-game bonuses \
 ahead overall, ending it can deny the opponent their bonuses.
 - Order matters within a round: scoring happens top-to-bottom, so completing a \
 line adjacent to one you'll also complete this round compounds the score.
-- Denial matters: if the opponent can't place a color (their only open line for \
+- BLOCK THE OPPONENT. Anticipate their next move: if they have a line one or \
+two tiles from completing and the tiles they need are available, TAKING those \
+tiles yourself denies them — often worth more than a small gain of your own. \
+The 'OPPONENT IMMINENT THREATS' section lists exactly what they can complete and \
+for how much; candidate moves marked 'DENIES' take tiles they were counting on. \
+A move that blocks a big completion can swing the game even if it parks a tile on \
+your floor. Also: if the opponent can't place a color (their only open line for \
 it is taken or walled), forcing 3+ of that color onto them floods their floor \
 with penalties. Watch which colors will be left at round end so you don't get \
 stuck taking penalties yourself.
@@ -222,7 +228,41 @@ def describe_state(state: GameState) -> str:
     parts.append(_describe_board(state, me, "YOUR BOARD"))
     parts.append("")
     parts.append(_describe_board(state, opp, "OPPONENT BOARD"))
+    threats = _imminent_completions(state, opp)
+    if threats:
+        parts.append("")
+        parts.append("OPPONENT IMMINENT THREATS (lines they could complete now "
+                     "with available tiles — consider taking those tiles to block):")
+        parts.extend(f"  {t}" for t in threats)
     return "\n".join(parts)
+
+
+def _imminent_completions(state: GameState, player: int) -> list[str]:
+    """Partial pattern lines `player` could finish THIS turn given the tiles
+    currently available, with how much wall score that completion would lock in.
+    Surfaces blocking opportunities for the opponent of `player`."""
+    board = state.player_boards[player]
+    avail = {c: 0 for c in Color}
+    for factory in state.factories:
+        for c, n in factory.items():
+            avail[c] += n
+    for c, n in state.center.items():
+        avail[c] += n
+    out = []
+    for row, pl in enumerate(board.pattern_lines):
+        cap = PATTERN_LINE_CAPACITY[row]
+        if pl.color is None or not (0 < pl.count < cap):
+            continue
+        col = next(k for k in range(5) if WALL_PATTERN[row][k] == pl.color)
+        if board.wall[row][col] is not None:
+            continue
+        needed = cap - pl.count
+        if avail[pl.color] >= needed:
+            pts = GameState._adjacency_score(board.wall, row, col)
+            out.append(f"row {row}: {pl.count}/{cap} {color_name(pl.color)} — "
+                       f"needs {needed}, {avail[pl.color]} available "
+                       f"→ would score ~{pts}")
+    return out
 
 
 def _move_annotation(state: GameState, board, move: Move) -> str:
@@ -276,38 +316,67 @@ def _move_annotation(state: GameState, board, move: Move) -> str:
     )
 
 
-def rank_moves(state: GameState, k: Optional[int] = None):
-    """Score every legal move the way GreedyAgent does — apply it to a clone and
-    evaluate() the result for the mover — and return [(move, score), ...] sorted
-    best-first. Truncated to the top k if given."""
-    from azul.heuristics import evaluate
+def rank_moves(state: GameState, k: Optional[int] = None,
+               opponent_aware: bool = False):
+    """Score every legal move and return [(move, score), ...] best-first
+    (truncated to top k if given).
+
+    opponent_aware=False: GreedyAgent's one-ply self score, evaluate(nxt, me).
+    opponent_aware=True: a relative, threat-aware score —
+        threat_aware_evaluate(nxt, me) - threat_aware_evaluate(nxt, opp).
+    The relative form makes DENIAL surface: taking tiles the opponent needs
+    drops their threat at nxt, raising the move's score, so blocking moves climb
+    into the top-k instead of being pruned by the self-only ranking.
+    """
+    from azul.heuristics import evaluate, threat_aware_evaluate
 
     me = state.current_player
+    opp = 1 - me
     scored = []
     for move in state.legal_moves():
         nxt = state.clone()
         nxt.apply(move)
-        scored.append((move, evaluate(nxt, me)))
+        if opponent_aware:
+            s = threat_aware_evaluate(nxt, me) - threat_aware_evaluate(nxt, opp)
+        else:
+            s = evaluate(nxt, me)
+        scored.append((move, s))
     scored.sort(key=lambda ms: ms[1], reverse=True)
     return scored if k is None else scored[:k]
 
 
+def _denial_note(state: GameState, move: Move) -> str:
+    """How much this move cuts the opponent's imminent completion threat — its
+    blocking value. Empty string if it denies nothing meaningful."""
+    from azul.heuristics import threat_score
+
+    opp = 1 - state.current_player
+    before = threat_score(state, opp)
+    nxt = state.clone()
+    nxt.apply(move)
+    delta = before - threat_score(nxt, opp)
+    if delta > 0.05:
+        return f"  DENIES opponent ~{delta:.1f} (takes tiles they needed to complete)"
+    return ""
+
+
 def describe_candidate_moves(state: GameState, scored: list) -> str:
-    """Render a pre-ranked candidate set (move, eval-score) with annotations.
-    The eval score is GreedyAgent's one-ply tactical estimate — useful but
-    myopic, which the header tells the model so it doesn't blindly take rank 1."""
+    """Render a pre-ranked candidate set (move, score) with annotations and a
+    denial note. The score is a one-ply estimate (relative + threat-aware when
+    the ranking is opponent-aware) — useful but shallow, which the header flags."""
     board = state.player_boards[state.current_player]
     lines = [
-        "CANDIDATE MOVES — pre-ranked by a one-ply tactical evaluator (higher "
-        "eval = stronger immediate position for you). That score is MYOPIC: it "
-        "barely credits multi-round setups, so when scores are close prefer the "
-        "move that best builds toward a column/color bonus rather than just "
-        "taking rank 1. Choose exactly one code:",
+        "CANDIDATE MOVES — pre-ranked by a one-ply evaluator that accounts for "
+        "both your gains AND denying the opponent (higher = better for you). It "
+        "is still shallow: when scores are close, prefer the move that best "
+        "builds toward a column/color bonus or blocks the opponent's biggest "
+        "threat. 'DENIES' marks blocking moves. Choose exactly one code:",
     ]
     for rank, (move, score) in enumerate(scored, 1):
         lines.append(
-            f"  {rank}. {move_to_shortcut(move)} (eval {score:.1f})  — "
+            f"  {rank}. {move_to_shortcut(move)} (score {score:+.1f})  — "
             f"{render_move(move)}  [{_move_annotation(state, board, move)}]"
+            f"{_denial_note(state, move)}"
         )
     return "\n".join(lines)
 
@@ -356,6 +425,7 @@ class LLMAgent(Agent):
         model: str = DEFAULT_MODEL,
         effort: str = DEFAULT_EFFORT,
         top_k: Optional[int] = 12,
+        opponent_aware: bool = True,
         client=None,
         complete: Optional[CompleteFn] = None,
         max_move_retries: int = 2,
@@ -366,9 +436,12 @@ class LLMAgent(Agent):
         """Args:
         model: Claude model id (default Sonnet 4.6).
         effort: output_config effort — "low" (default) | "medium" | "high" | "max".
-        top_k: show only the top-k moves ranked by the Greedy evaluator (hybrid
-            mode — tactically vetted candidates + LLM judgment). None = show all
-            legal moves annotated (no ranking).
+        top_k: show only the top-k moves ranked by the evaluator (hybrid mode —
+            tactically vetted candidates + LLM judgment). None = show all legal
+            moves annotated (no ranking).
+        opponent_aware: rank candidates by a relative, threat-aware score so
+            blocking/denial moves surface into the top-k (default True). Only
+            applies in top_k mode.
         client: an anthropic.Anthropic instance; created lazily if omitted.
         complete: override the network call entirely — (system, messages) -> text.
             Used by tests so no API key or network is needed.
@@ -380,6 +453,7 @@ class LLMAgent(Agent):
         self.model = model
         self.effort = effort
         self.top_k = top_k
+        self.opponent_aware = opponent_aware
         self._client = client
         self._complete = complete
         self.max_move_retries = max_move_retries
@@ -418,7 +492,8 @@ class LLMAgent(Agent):
 
         complete = self._complete or self._default_complete
         if self.top_k is not None:
-            moves_text = describe_candidate_moves(state, rank_moves(state, self.top_k))
+            ranked = rank_moves(state, self.top_k, opponent_aware=self.opponent_aware)
+            moves_text = describe_candidate_moves(state, ranked)
         else:
             moves_text = describe_legal_moves(state, moves)
         user = f"{describe_state(state)}\n\n{moves_text}\n\nChoose your move."

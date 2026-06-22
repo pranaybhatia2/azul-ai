@@ -19,7 +19,7 @@ from typing import Optional
 
 from azul.agent import Agent
 from azul.game import advance_round_if_over, winner_of
-from azul.heuristics import evaluate
+from azul.heuristics import evaluate, threat_aware_evaluate
 from azul.state import GameState, Move
 
 SQRT2 = math.sqrt(2)
@@ -51,7 +51,7 @@ class _Node:
 class MCTSAgent(Agent):
     def __init__(self, iterations: int = 200, rng=None, c: float = SQRT2,
                  rollout: str = "random", rollout_depth: Optional[int] = None,
-                 eval_scale: float = 10.0):
+                 eval_scale: float = 10.0, threat_aware: bool = False):
         if rollout not in ("random", "greedy"):
             raise ValueError("rollout must be 'random' or 'greedy'")
         self.iterations = iterations
@@ -62,6 +62,10 @@ class MCTSAgent(Agent):
         # many moves and scores with evaluate() (squashed to [0,1] by eval_scale).
         self.rollout_depth = rollout_depth
         self.eval_scale = eval_scale
+        # When True, the truncated-rollout leaf eval adds an opponent-threat
+        # term so the search values denial (taking tiles the opponent needs).
+        self.threat_aware = threat_aware
+        self._leaf_value = threat_aware_evaluate if threat_aware else evaluate
 
     def choose_move(self, state: GameState) -> Move:
         visits = self.visit_counts(state)
@@ -135,8 +139,10 @@ class MCTSAgent(Agent):
                 return _reward(winner_of(scores), 0)
 
     def _eval_reward(self, state) -> float:
-        """Squash the relative heuristic value into a [0,1] reward for P0."""
-        v = evaluate(state, 0) - evaluate(state, 1)
+        """Squash the relative heuristic value into a [0,1] reward for P0.
+        Uses the threat-aware value when enabled, so denying the opponent
+        raises the reward of the states that result from blocking moves."""
+        v = self._leaf_value(state, 0) - self._leaf_value(state, 1)
         return 1.0 / (1.0 + math.exp(-v / self.eval_scale))
 
     def _greedy_move(self, state, moves):
