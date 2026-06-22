@@ -24,9 +24,13 @@ INF = float("inf")
 
 
 class MinimaxAgent(Agent):
-    def __init__(self, depth: int = 2, use_tt: bool = True):
+    def __init__(self, depth: int = 2, use_tt: bool = True, leaf_eval=None):
         self.depth = depth
         self.use_tt = use_tt
+        # Pluggable leaf evaluator (state, player) -> float; defaults to the
+        # within-round evaluate(). Pass bonus_aware_evaluate to extend the
+        # search's horizon to end-game bonuses (used for LLM candidate ranking).
+        self.leaf_eval = leaf_eval if leaf_eval is not None else evaluate
         self.nodes = 0   # populated each choose_move, for measurement
 
     def choose_move(self, state: GameState) -> Move:
@@ -70,7 +74,7 @@ class MinimaxAgent(Agent):
     # ------------------------------------------------------------------
 
     def _leaf_value(self, state: GameState, me: int) -> float:
-        return evaluate(state, me) - evaluate(state, 1 - me)
+        return self.leaf_eval(state, me) - self.leaf_eval(state, 1 - me)
 
     def _children(self, state: GameState, me: int, maximizing: bool):
         """All (move, resulting_state) pairs, ordered best-first for the side

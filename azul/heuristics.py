@@ -111,3 +111,36 @@ def threat_aware_evaluate(state: GameState, player: int) -> float:
     """evaluate() plus a weighted opponent-/self-threat term. The value
     function for threat-aware MCTS (used relatively: value(0) - value(1))."""
     return evaluate(state, player) + THREAT_WEIGHT * threat_score(state, player)
+
+
+# Weight on unrealized end-game bonus potential (full column +7, row +2,
+# color +10). evaluate() and the minimax search horizon are both within-round
+# and never see these, so the ranking search undervalues building toward them.
+# Weighted down because they're unrealized; squared fill makes near-complete
+# bonuses worth disproportionately more (so the search drives them home).
+BONUS_WEIGHT = 0.5
+
+
+def end_game_bonus_potential(board: PlayerBoard) -> float:
+    """Forward-looking value of partial wall structure toward end-game bonuses:
+    columns (+7), rows (+2), and color sets (+10), each scaled by (fill/5)^2."""
+    wall = board.wall
+    total = 0.0
+    for c in range(5):
+        filled = sum(wall[r][c] is not None for r in range(5))
+        total += 7.0 * (filled / 5) ** 2
+    for r in range(5):
+        filled = sum(wall[r][c] is not None for c in range(5))
+        total += 2.0 * (filled / 5) ** 2
+    for color in Color:
+        placed = sum(wall[r][c] == color for r in range(5) for c in range(5))
+        total += 10.0 * (placed / 5) ** 2
+    return total
+
+
+def bonus_aware_evaluate(state: GameState, player: int) -> float:
+    """evaluate() plus weighted end-game-bonus potential. Used as the leaf eval
+    for the candidate-ranking search so it values column/color building despite
+    minimax's within-round horizon."""
+    board = state.player_boards[player]
+    return evaluate(state, player) + BONUS_WEIGHT * end_game_bonus_potential(board)

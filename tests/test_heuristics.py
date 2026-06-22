@@ -1,6 +1,7 @@
 """Tests for the position evaluation function."""
 from azul.heuristics import (
-    evaluate, threat_score, threat_aware_evaluate, PARTIAL_WEIGHT, THREAT_WEIGHT,
+    evaluate, threat_score, threat_aware_evaluate, end_game_bonus_potential,
+    bonus_aware_evaluate, PARTIAL_WEIGHT, THREAT_WEIGHT, BONUS_WEIGHT,
     _pending_wall_points,
 )
 from azul.state import Color, GameState, WALL_PATTERN, PATTERN_LINE_CAPACITY
@@ -122,3 +123,30 @@ def test_threat_aware_equals_evaluate_when_no_threats():
     gs = GameState()
     gs.player_boards[0].score = 12
     assert threat_aware_evaluate(gs, 0) == evaluate(gs, 0)
+
+
+# --- bonus-aware evaluation -------------------------------------------------
+
+def test_bonus_potential_zero_on_empty_wall():
+    assert end_game_bonus_potential(GameState().player_boards[0]) == 0.0
+
+
+def test_bonus_potential_rewards_near_complete_column():
+    # A column 4/5 filled should be worth more than 2/5 (squared fill, +7 col).
+    b4 = GameState().player_boards[0]
+    for r in range(4):
+        b4.wall[r][0] = WALL_PATTERN[r][0]
+    b2 = GameState().player_boards[0]
+    for r in range(2):
+        b2.wall[r][0] = WALL_PATTERN[r][0]
+    assert end_game_bonus_potential(b4) > end_game_bonus_potential(b2) > 0
+
+
+def test_bonus_aware_adds_potential_to_evaluate():
+    gs = GameState()
+    b = gs.player_boards[0]
+    for r in range(4):
+        b.wall[r][0] = WALL_PATTERN[r][0]   # near-complete column
+    expected = evaluate(gs, 0) + BONUS_WEIGHT * end_game_bonus_potential(b)
+    assert abs(bonus_aware_evaluate(gs, 0) - expected) < 1e-9
+    assert bonus_aware_evaluate(gs, 0) > evaluate(gs, 0)

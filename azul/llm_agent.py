@@ -327,7 +327,8 @@ def _move_annotation(state: GameState, board, move: Move) -> str:
 
 def rank_moves(state: GameState, k: Optional[int] = None,
                opponent_aware: bool = False,
-               search_depth: Optional[int] = None):
+               search_depth: Optional[int] = None,
+               bonus_aware: bool = False):
     """Score every legal move and return [(move, score), ...] best-first
     (truncated to top k if given).
 
@@ -343,18 +344,21 @@ def rank_moves(state: GameState, k: Optional[int] = None,
     """
     if search_depth is not None and search_depth >= 2:
         from azul.minimax import MinimaxAgent
+        from azul.heuristics import bonus_aware_evaluate
 
+        leaf = bonus_aware_evaluate if bonus_aware else None
         if search_depth >= 4:
             # Selective deepening: full depth-4 over ~85 moves is ~20s/turn, so
             # prune with a cheap depth-2 pass first, then deep-search only the
             # survivors (keep a generous margin above k so the deep re-rank can
             # still reorder). ~4s/turn instead of ~20s.
             keep_n = max(2 * (k or 12), 16)
-            shallow = MinimaxAgent(depth=2).move_values(state)
+            shallow = MinimaxAgent(depth=2, leaf_eval=leaf).move_values(state)
             survivors = [m for m, _ in shallow[:keep_n]]
-            scored = MinimaxAgent(depth=search_depth).move_values(state, survivors)
+            scored = MinimaxAgent(depth=search_depth, leaf_eval=leaf).move_values(
+                state, survivors)
         else:
-            scored = MinimaxAgent(depth=search_depth).move_values(state)
+            scored = MinimaxAgent(depth=search_depth, leaf_eval=leaf).move_values(state)
         return scored if k is None else scored[:k]
 
     from azul.heuristics import evaluate, threat_aware_evaluate
@@ -458,6 +462,7 @@ class LLMAgent(Agent):
         top_k: Optional[int] = 12,
         opponent_aware: bool = True,
         search_depth: Optional[int] = 3,
+        bonus_aware: bool = True,
         client=None,
         complete: Optional[CompleteFn] = None,
         max_move_retries: int = 2,
@@ -477,6 +482,9 @@ class LLMAgent(Agent):
             of a 1-ply score (default 3). Gives the LLM lookahead-vetted moves
             that already account for the opponent's replies. None/1 falls back
             to the 1-ply ranking.
+        bonus_aware: use an end-game-bonus-aware leaf eval in the ranking search
+            (default True), extending minimax's within-round horizon so it
+            values column/color building. Only applies in minimax ranking.
         client: an anthropic.Anthropic instance; created lazily if omitted.
         complete: override the network call entirely — (system, messages) -> text.
             Used by tests so no API key or network is needed.
@@ -490,6 +498,7 @@ class LLMAgent(Agent):
         self.top_k = top_k
         self.opponent_aware = opponent_aware
         self.search_depth = search_depth
+        self.bonus_aware = bonus_aware
         self._client = client
         self._complete = complete
         self.max_move_retries = max_move_retries
@@ -530,7 +539,8 @@ class LLMAgent(Agent):
         if self.top_k is not None:
             ranked = rank_moves(state, self.top_k,
                                 opponent_aware=self.opponent_aware,
-                                search_depth=self.search_depth)
+                                search_depth=self.search_depth,
+                                bonus_aware=self.bonus_aware)
             moves_text = describe_candidate_moves(state, ranked)
         else:
             moves_text = describe_legal_moves(state, moves)
