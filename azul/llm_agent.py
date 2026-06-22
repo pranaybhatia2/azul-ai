@@ -344,7 +344,17 @@ def rank_moves(state: GameState, k: Optional[int] = None,
     if search_depth is not None and search_depth >= 2:
         from azul.minimax import MinimaxAgent
 
-        scored = MinimaxAgent(depth=search_depth).move_values(state)
+        if search_depth >= 4:
+            # Selective deepening: full depth-4 over ~85 moves is ~20s/turn, so
+            # prune with a cheap depth-2 pass first, then deep-search only the
+            # survivors (keep a generous margin above k so the deep re-rank can
+            # still reorder). ~4s/turn instead of ~20s.
+            keep_n = max(2 * (k or 12), 16)
+            shallow = MinimaxAgent(depth=2).move_values(state)
+            survivors = [m for m, _ in shallow[:keep_n]]
+            scored = MinimaxAgent(depth=search_depth).move_values(state, survivors)
+        else:
+            scored = MinimaxAgent(depth=search_depth).move_values(state)
         return scored if k is None else scored[:k]
 
     from azul.heuristics import evaluate, threat_aware_evaluate

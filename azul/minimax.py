@@ -45,17 +45,23 @@ class MinimaxAgent(Agent):
             alpha = max(alpha, best_value)
         return best_move
 
-    def move_values(self, state: GameState) -> list[tuple[Move, float]]:
-        """Every legal root move with its depth-limited minimax value (from the
-        mover's perspective), best-first. Same search as choose_move, but each
-        root move is searched with a FULL window (no rising alpha across the
-        root) so all values are exact and comparable for ranking — used to feed
-        the LLM a set of lookahead-vetted candidates."""
+    def move_values(self, state: GameState,
+                    moves: list[Move] | None = None) -> list[tuple[Move, float]]:
+        """Root moves with their depth-limited minimax value (from the mover's
+        perspective), best-first. Same search as choose_move, but each root move
+        gets a FULL window (no rising alpha across the root) so all values are
+        exact and comparable for ranking. If `moves` is given, only those root
+        moves are searched — used for selective deepening (a cheap shallow pass
+        prunes the root, then the survivors are re-searched deep)."""
         self.nodes = 0
         me = state.current_player
         tt: dict | None = {} if self.use_tt else None
+        children = self._children(state, me, maximizing=True)
+        if moves is not None:
+            keep = set(moves)
+            children = [(m, c) for m, c in children if m in keep]
         out = []
-        for move, child in self._children(state, me, maximizing=True):
+        for move, child in children:
             value = self._search(child, self.depth - 1, -INF, INF, me, tt)
             out.append((move, value))
         out.sort(key=lambda mv: mv[1], reverse=True)

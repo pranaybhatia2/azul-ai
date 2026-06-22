@@ -162,6 +162,13 @@ def test_search_depth_is_default_three():
     assert LLMAgent(complete=lambda s, m: "x").search_depth == 3
 
 
+def test_selective_deepening_depth4_returns_legal_topk():
+    gs = GameState.new_game(42)
+    ranked = rank_moves(gs, 12, search_depth=4)  # selective: depth-2 prune -> depth-4
+    assert len(ranked) == 12
+    assert all(m in gs.legal_moves() for m, _ in ranked)
+
+
 # --- reply parsing ----------------------------------------------------------
 
 def _legal(gs):

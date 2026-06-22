@@ -20,6 +20,14 @@ def test_move_values_top_matches_choose_move():
     assert ranked[0][0] == MinimaxAgent(depth=2).choose_move(gs)  # top == pick
 
 
+def test_move_values_restricts_to_subset():
+    gs = GameState.new_game(42)
+    agent = MinimaxAgent(depth=2)
+    subset = [m for m, _ in agent.move_values(gs)[:5]]
+    restricted = agent.move_values(gs, subset)
+    assert {m for m, _ in restricted} == set(subset)
+
+
 def test_deterministic():
     gs = GameState.new_game(42)
     a = MinimaxAgent(depth=2).choose_move(gs)
