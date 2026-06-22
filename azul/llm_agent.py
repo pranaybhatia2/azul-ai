@@ -507,6 +507,8 @@ class LLMAgent(Agent):
             moves_text = describe_legal_moves(state, moves)
         user = f"{describe_state(state)}\n\n{moves_text}\n\nChoose your move."
         messages: list[dict] = [{"role": "user", "content": user}]
+        if self.verbose:
+            print(f"[LLMAgent] prompt:\n{user}\n")
 
         for attempt in range(self.max_move_retries + 1):
             try:
