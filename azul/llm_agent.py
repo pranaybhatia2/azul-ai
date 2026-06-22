@@ -328,20 +328,35 @@ def _move_annotation(state: GameState, board, move: Move) -> str:
 def rank_moves(state: GameState, k: Optional[int] = None,
                opponent_aware: bool = False,
                search_depth: Optional[int] = None,
-               bonus_aware: bool = False):
+               bonus_aware: bool = False,
+               mcts_iterations: Optional[int] = None,
+               rng=None):
     """Score every legal move and return [(move, score), ...] best-first
     (truncated to top k if given).
 
+    mcts_iterations set: rank by MCTS visit counts (the score is the visit
+        count). The agent inherits MCTS-level search to game end via rollouts;
+        the LLM then picks among MCTS's most-visited moves, adding cross-round
+        judgment. Strongest (and most expensive) ranking.
     search_depth>=2: rank by depth-limited alpha-beta minimax (reuses
         minimax.py). The value already accounts for the opponent's best replies
-        N plies deep — this gives the LLM lookahead-vetted candidates and makes
-        denial fall out of the search (taking a tile the opponent needs lowers
-        their reply value). This is the strongest ranking; the 1-ply modes below
-        are fallbacks.
+        N plies deep — gives the LLM lookahead-vetted candidates and makes
+        denial fall out of the search.
     Otherwise (1-ply):
       opponent_aware=False -> GreedyAgent's self score, evaluate(nxt, me).
       opponent_aware=True  -> relative threat-aware score (surfaces denial).
     """
+    if mcts_iterations is not None and mcts_iterations > 0:
+        import random as _random
+        from azul.mcts import MCTSAgent
+
+        agent = MCTSAgent(iterations=mcts_iterations,
+                          rng=rng if rng is not None else _random.Random(),
+                          rollout="greedy", rollout_depth=8)
+        visits = agent.visit_counts(state)
+        scored = sorted(visits.items(), key=lambda mv: mv[1], reverse=True)
+        return scored if k is None else scored[:k]
+
     if search_depth is not None and search_depth >= 2:
         from azul.minimax import MinimaxAgent
         from azul.heuristics import bonus_aware_evaluate
@@ -399,13 +414,12 @@ def describe_candidate_moves(state: GameState, scored: list) -> str:
     the ranking is opponent-aware) — useful but shallow, which the header flags."""
     board = state.player_boards[state.current_player]
     lines = [
-        "CANDIDATE MOVES — pre-ranked by a lookahead search that already factors "
-        "in the opponent's best replies (higher score = better for you). The "
-        "search has a within-round horizon, so it MISSES end-of-game bonuses — "
-        "your job is to apply that longer view: when scores are close, prefer "
-        "the move that best builds toward a column/color bonus (or blocks the "
-        "opponent's biggest threat). 'DENIES' marks blocking moves. Choose "
-        "exactly one code:",
+        "CANDIDATE MOVES — pre-ranked by a search that already factors in the "
+        "opponent's best replies (higher score = better for you). The search "
+        "can UNDERWEIGHT end-of-game bonuses (full columns/colors), so apply "
+        "that longer view: when scores are close, prefer the move that best "
+        "builds toward a column/color bonus (or blocks the opponent's biggest "
+        "threat). 'DENIES' marks blocking moves. Choose exactly one code:",
     ]
     for rank, (move, score) in enumerate(scored, 1):
         lines.append(
@@ -463,6 +477,7 @@ class LLMAgent(Agent):
         opponent_aware: bool = True,
         search_depth: Optional[int] = 3,
         bonus_aware: bool = False,
+        mcts_iterations: Optional[int] = None,
         client=None,
         complete: Optional[CompleteFn] = None,
         max_move_retries: int = 2,
@@ -486,6 +501,9 @@ class LLMAgent(Agent):
             (default False — tested 3-3 vs strong MCTS, no better than plain
             depth-3 and more erratic; kept for tuning). Only applies in minimax
             ranking.
+        mcts_iterations: if set, rank candidates by MCTS visit counts at this
+            iteration budget instead of minimax (the agent inherits MCTS search
+            + LLM judgment). Slower; overrides search_depth.
         client: an anthropic.Anthropic instance; created lazily if omitted.
         complete: override the network call entirely — (system, messages) -> text.
             Used by tests so no API key or network is needed.
@@ -500,6 +518,7 @@ class LLMAgent(Agent):
         self.opponent_aware = opponent_aware
         self.search_depth = search_depth
         self.bonus_aware = bonus_aware
+        self.mcts_iterations = mcts_iterations
         self._client = client
         self._complete = complete
         self.max_move_retries = max_move_retries
@@ -541,7 +560,8 @@ class LLMAgent(Agent):
             ranked = rank_moves(state, self.top_k,
                                 opponent_aware=self.opponent_aware,
                                 search_depth=self.search_depth,
-                                bonus_aware=self.bonus_aware)
+                                bonus_aware=self.bonus_aware,
+                                mcts_iterations=self.mcts_iterations)
             moves_text = describe_candidate_moves(state, ranked)
         else:
             moves_text = describe_legal_moves(state, moves)

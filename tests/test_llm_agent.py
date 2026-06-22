@@ -169,6 +169,16 @@ def test_selective_deepening_depth4_returns_legal_topk():
     assert all(m in gs.legal_moves() for m, _ in ranked)
 
 
+def test_mcts_ranking_returns_legal_topk_by_visits():
+    import random
+    gs = GameState.new_game(42)
+    ranked = rank_moves(gs, 12, mcts_iterations=60, rng=random.Random(0))
+    assert len(ranked) == 12
+    assert all(m in gs.legal_moves() for m, _ in ranked)
+    scores = [s for _, s in ranked]
+    assert scores == sorted(scores, reverse=True)  # by visit count, best-first
+
+
 # --- reply parsing ----------------------------------------------------------
 
 def _legal(gs):
