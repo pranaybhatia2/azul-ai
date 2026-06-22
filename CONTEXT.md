@@ -82,10 +82,19 @@ the laptop plateau was a compute wall, broken on Modal.
   cloud containers), genuine AlphaZero refinement of the distilled net CLIMBED
   vs Greedy:
         iter 0: 0%  →  iter 1: 8%  →  iter 2: 17%  →  iter 3: 33%
-  First-ever NN wins vs Greedy, monotonic — the policy-improvement loop working
-  once fed enough simulations. Self-play improvement is open-ended (NOT capped
-  at the teacher, unlike distillation). The laptop plateau was the
-  branching-factor compute wall (same as Phases 4-5); cloud scale clears it.
+  First-ever NN wins vs Greedy — the policy-improvement loop working once fed
+  enough simulations. Self-play improvement is open-ended (NOT capped at the
+  teacher, unlike distillation). The laptop plateau was the branching-factor
+  compute wall (same as Phases 4-5); cloud scale clears it.
+
+  **Final scaled result (replay buffer + 24-game evals, 12 iters):** training
+  on only the newest iteration's games caused oscillation (17/0/25%); a REPLAY
+  BUFFER (last 6 iters) fixed it → steady climb 0→...→30% vs Greedy, **100% vs
+  Random, 30% vs Greedy (12-28, 40-game eval)**. Still gently rising at iter 12.
+  Honest bottom line: cloud scale broke the 0% wall and the net climbs steadily
+  to ~30% vs Greedy, but did NOT surpass Greedy (>50%) on this budget (12 iters
+  / 60 games / 800 sims) — slow diminishing returns. Beating Greedy outright
+  with the net would need many more iterations / more sims+games per iter.
 
 ## Scaling infra (scripts/modal_train.py, docs/MODAL.md)
   Workload is CPU-bound (tiny net) → scale = many CPU containers, not a GPU.
