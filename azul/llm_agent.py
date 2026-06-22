@@ -462,7 +462,7 @@ class LLMAgent(Agent):
         top_k: Optional[int] = 12,
         opponent_aware: bool = True,
         search_depth: Optional[int] = 3,
-        bonus_aware: bool = True,
+        bonus_aware: bool = False,
         client=None,
         complete: Optional[CompleteFn] = None,
         max_move_retries: int = 2,
@@ -483,8 +483,9 @@ class LLMAgent(Agent):
             that already account for the opponent's replies. None/1 falls back
             to the 1-ply ranking.
         bonus_aware: use an end-game-bonus-aware leaf eval in the ranking search
-            (default True), extending minimax's within-round horizon so it
-            values column/color building. Only applies in minimax ranking.
+            (default False — tested 3-3 vs strong MCTS, no better than plain
+            depth-3 and more erratic; kept for tuning). Only applies in minimax
+            ranking.
         client: an anthropic.Anthropic instance; created lazily if omitted.
         complete: override the network call entirely — (system, messages) -> text.
             Used by tests so no API key or network is needed.
