@@ -11,6 +11,15 @@ def test_returns_a_legal_move():
     assert move in gs.legal_moves()
 
 
+def test_move_values_top_matches_choose_move():
+    gs = GameState.new_game(42)
+    ranked = MinimaxAgent(depth=2).move_values(gs)
+    assert len(ranked) == len(gs.legal_moves())          # every move scored
+    scores = [s for _, s in ranked]
+    assert scores == sorted(scores, reverse=True)        # best-first
+    assert ranked[0][0] == MinimaxAgent(depth=2).choose_move(gs)  # top == pick
+
+
 def test_deterministic():
     gs = GameState.new_game(42)
     a = MinimaxAgent(depth=2).choose_move(gs)

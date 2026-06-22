@@ -326,17 +326,27 @@ def _move_annotation(state: GameState, board, move: Move) -> str:
 
 
 def rank_moves(state: GameState, k: Optional[int] = None,
-               opponent_aware: bool = False):
+               opponent_aware: bool = False,
+               search_depth: Optional[int] = None):
     """Score every legal move and return [(move, score), ...] best-first
     (truncated to top k if given).
 
-    opponent_aware=False: GreedyAgent's one-ply self score, evaluate(nxt, me).
-    opponent_aware=True: a relative, threat-aware score —
-        threat_aware_evaluate(nxt, me) - threat_aware_evaluate(nxt, opp).
-    The relative form makes DENIAL surface: taking tiles the opponent needs
-    drops their threat at nxt, raising the move's score, so blocking moves climb
-    into the top-k instead of being pruned by the self-only ranking.
+    search_depth>=2: rank by depth-limited alpha-beta minimax (reuses
+        minimax.py). The value already accounts for the opponent's best replies
+        N plies deep — this gives the LLM lookahead-vetted candidates and makes
+        denial fall out of the search (taking a tile the opponent needs lowers
+        their reply value). This is the strongest ranking; the 1-ply modes below
+        are fallbacks.
+    Otherwise (1-ply):
+      opponent_aware=False -> GreedyAgent's self score, evaluate(nxt, me).
+      opponent_aware=True  -> relative threat-aware score (surfaces denial).
     """
+    if search_depth is not None and search_depth >= 2:
+        from azul.minimax import MinimaxAgent
+
+        scored = MinimaxAgent(depth=search_depth).move_values(state)
+        return scored if k is None else scored[:k]
+
     from azul.heuristics import evaluate, threat_aware_evaluate
 
     me = state.current_player
@@ -375,11 +385,13 @@ def describe_candidate_moves(state: GameState, scored: list) -> str:
     the ranking is opponent-aware) — useful but shallow, which the header flags."""
     board = state.player_boards[state.current_player]
     lines = [
-        "CANDIDATE MOVES — pre-ranked by a one-ply evaluator that accounts for "
-        "both your gains AND denying the opponent (higher = better for you). It "
-        "is still shallow: when scores are close, prefer the move that best "
-        "builds toward a column/color bonus or blocks the opponent's biggest "
-        "threat. 'DENIES' marks blocking moves. Choose exactly one code:",
+        "CANDIDATE MOVES — pre-ranked by a lookahead search that already factors "
+        "in the opponent's best replies (higher score = better for you). The "
+        "search has a within-round horizon, so it MISSES end-of-game bonuses — "
+        "your job is to apply that longer view: when scores are close, prefer "
+        "the move that best builds toward a column/color bonus (or blocks the "
+        "opponent's biggest threat). 'DENIES' marks blocking moves. Choose "
+        "exactly one code:",
     ]
     for rank, (move, score) in enumerate(scored, 1):
         lines.append(
@@ -435,6 +447,7 @@ class LLMAgent(Agent):
         effort: str = DEFAULT_EFFORT,
         top_k: Optional[int] = 12,
         opponent_aware: bool = True,
+        search_depth: Optional[int] = 3,
         client=None,
         complete: Optional[CompleteFn] = None,
         max_move_retries: int = 2,
@@ -448,9 +461,12 @@ class LLMAgent(Agent):
         top_k: show only the top-k moves ranked by the evaluator (hybrid mode —
             tactically vetted candidates + LLM judgment). None = show all legal
             moves annotated (no ranking).
-        opponent_aware: rank candidates by a relative, threat-aware score so
-            blocking/denial moves surface into the top-k (default True). Only
-            applies in top_k mode.
+        opponent_aware: in 1-ply ranking (search_depth<2), rank by a relative
+            threat-aware score so blocking/denial moves surface (default True).
+        search_depth: rank the top-k candidates by depth-limited minimax instead
+            of a 1-ply score (default 3). Gives the LLM lookahead-vetted moves
+            that already account for the opponent's replies. None/1 falls back
+            to the 1-ply ranking.
         client: an anthropic.Anthropic instance; created lazily if omitted.
         complete: override the network call entirely — (system, messages) -> text.
             Used by tests so no API key or network is needed.
@@ -463,6 +479,7 @@ class LLMAgent(Agent):
         self.effort = effort
         self.top_k = top_k
         self.opponent_aware = opponent_aware
+        self.search_depth = search_depth
         self._client = client
         self._complete = complete
         self.max_move_retries = max_move_retries
@@ -501,7 +518,9 @@ class LLMAgent(Agent):
 
         complete = self._complete or self._default_complete
         if self.top_k is not None:
-            ranked = rank_moves(state, self.top_k, opponent_aware=self.opponent_aware)
+            ranked = rank_moves(state, self.top_k,
+                                opponent_aware=self.opponent_aware,
+                                search_depth=self.search_depth)
             moves_text = describe_candidate_moves(state, ranked)
         else:
             moves_text = describe_legal_moves(state, moves)

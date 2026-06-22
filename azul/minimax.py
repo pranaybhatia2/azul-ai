@@ -45,6 +45,22 @@ class MinimaxAgent(Agent):
             alpha = max(alpha, best_value)
         return best_move
 
+    def move_values(self, state: GameState) -> list[tuple[Move, float]]:
+        """Every legal root move with its depth-limited minimax value (from the
+        mover's perspective), best-first. Same search as choose_move, but each
+        root move is searched with a FULL window (no rising alpha across the
+        root) so all values are exact and comparable for ranking — used to feed
+        the LLM a set of lookahead-vetted candidates."""
+        self.nodes = 0
+        me = state.current_player
+        tt: dict | None = {} if self.use_tt else None
+        out = []
+        for move, child in self._children(state, me, maximizing=True):
+            value = self._search(child, self.depth - 1, -INF, INF, me, tt)
+            out.append((move, value))
+        out.sort(key=lambda mv: mv[1], reverse=True)
+        return out
+
     # ------------------------------------------------------------------
 
     def _leaf_value(self, state: GameState, me: int) -> float:
