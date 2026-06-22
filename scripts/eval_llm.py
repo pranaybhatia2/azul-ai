@@ -118,7 +118,9 @@ def eval_vs(opponent: str, n_games: int, model: str, effort: str,
     game_indices = range(start, start + n_games)
 
     def run_game(i):
-        llm = LLMAgent(model=model, effort=effort, top_k=TOP_K, verbose=verbose)
+        llm = LLMAgent(model=model, effort=effort, top_k=TOP_K,
+                       search_depth=SEARCH_DEPTH, bonus_aware=BONUS_AWARE,
+                       verbose=verbose)
         opp = make_opponent(opponent, seed=1000 + i)
         llm_seat = i % 2  # alternate seats (by absolute game index)
         result, fb = play_one_game(
@@ -158,8 +160,14 @@ def main(argv=None) -> None:
                         choices=["low", "medium", "high", "max"])
     parser.add_argument("--mcts-iterations", type=int, default=200)
     parser.add_argument("--top-k", type=int, default=12,
-                        help="show the LLM only the top-k moves ranked by the "
-                        "Greedy evaluator (hybrid mode). 0 = show all moves.")
+                        help="show the LLM only the top-k ranked moves (hybrid "
+                        "mode). 0 = show all moves.")
+    parser.add_argument("--search-depth", type=int, default=3,
+                        help="rank the LLM's candidates by alpha-beta minimax to "
+                        "this depth (default 3). 0/1 = 1-ply ranking.")
+    parser.add_argument("--no-bonus-aware", action="store_true",
+                        help="disable the end-game-bonus-aware leaf eval in the "
+                        "ranking search (on by default).")
     parser.add_argument("--start", type=int, default=0,
                         help="first game index (offsets seeds + seat alternation "
                         "so batches cover distinct games)")
@@ -174,9 +182,11 @@ def main(argv=None) -> None:
     from azul.envfile import load_env
     load_env()  # pick up ANTHROPIC_API_KEY from a local .env
 
-    global MCTS_ITERATIONS, TOP_K
+    global MCTS_ITERATIONS, TOP_K, SEARCH_DEPTH, BONUS_AWARE
     MCTS_ITERATIONS = args.mcts_iterations
     TOP_K = args.top_k if args.top_k > 0 else None  # 0 -> show all moves
+    SEARCH_DEPTH = args.search_depth if args.search_depth >= 2 else None
+    BONUS_AWARE = not args.no_bonus_aware
 
     opponents = ["greedy", "mcts"] if args.opponent == "both" else [args.opponent]
     for opp in opponents:

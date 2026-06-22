@@ -6,6 +6,8 @@ from azul.llm_agent import (
     describe_legal_moves,
     describe_state,
     rank_moves,
+    _denial_note,
+    _imminent_completions,
     _extract_move,
 )
 from azul.render import move_to_shortcut
@@ -80,7 +82,7 @@ def test_describe_candidate_moves_shows_eval_and_codes():
     gs = GameState.new_game(42)
     scored = rank_moves(gs, 8)
     text = describe_candidate_moves(gs, scored)
-    assert "eval" in text
+    assert "score" in text
     for move, _ in scored:
         assert move_to_shortcut(move) in text
 
@@ -92,6 +94,79 @@ def test_legal_move_annotations_flag_overflow():
     text = describe_legal_moves(gs, gs.legal_moves())
     line = next(ln for ln in text.splitlines() if ln.strip().startswith("0b0"))
     assert "overflow" in line.lower()
+
+
+# --- opponent-aware ranking / denial ----------------------------------------
+
+def _blocking_position():
+    """P0 to move. Opponent (P1) is one RED from completing row 4 for ~5 pts;
+    the only RED is in factory 0. P0's RED wall cells are filled so RED can only
+    go to the floor — making the block a pure denial (bad for P0's own board)."""
+    gs = GameState()
+    gs.current_player = 0
+    gs.factories[0] = {Color.RED: 1, Color.BLUE: 2}
+    opp = gs.player_boards[1]
+    opp.pattern_lines[4].color, opp.pattern_lines[4].count = Color.RED, 4
+    for r in range(4):
+        opp.wall[r][1] = WALL_PATTERN[r][1]   # vertical run -> completion worth ~5
+    me = gs.player_boards[0]
+    for r in range(5):
+        me.wall[r][(r + 2) % 5] = Color.RED   # RED only placeable on the floor
+    return gs
+
+
+def _took_red(move):
+    return move.source == 0 and move.color == Color.RED
+
+
+def test_opponent_aware_ranking_surfaces_the_block():
+    gs = _blocking_position()
+    plain_top = rank_moves(gs, opponent_aware=False)[0][0]
+    oa_top = rank_moves(gs, opponent_aware=True)[0][0]
+    assert not _took_red(plain_top)   # self-only ranking ignores the block
+    assert _took_red(oa_top)          # opponent-aware ranking blocks
+
+
+def test_denial_note_flags_blocking_move():
+    gs = _blocking_position()
+    block = next(m for m in gs.legal_moves() if _took_red(m))
+    own = next(m for m in gs.legal_moves()
+               if m.color == Color.BLUE and m.dest_line == 1)
+    assert "DENIES" in _denial_note(gs, block)
+    assert _denial_note(gs, own) == ""   # taking blue denies nothing
+
+
+def test_imminent_completions_lists_opponent_threat():
+    gs = _blocking_position()
+    threats = _imminent_completions(gs, 1)
+    assert len(threats) == 1 and "row 4" in threats[0] and "Red" in threats[0]
+
+
+def test_describe_state_surfaces_opponent_threats():
+    gs = _blocking_position()
+    assert "OPPONENT THREATS" in describe_state(gs)
+
+
+def test_opponent_aware_is_the_default():
+    assert LLMAgent(complete=lambda s, m: "x").opponent_aware is True
+
+
+def test_search_depth_ranking_uses_minimax():
+    from azul.minimax import MinimaxAgent
+    gs = GameState.new_game(42)
+    ranked = rank_moves(gs, search_depth=2)
+    assert ranked[0][0] == MinimaxAgent(depth=2).choose_move(gs)
+
+
+def test_search_depth_is_default_three():
+    assert LLMAgent(complete=lambda s, m: "x").search_depth == 3
+
+
+def test_selective_deepening_depth4_returns_legal_topk():
+    gs = GameState.new_game(42)
+    ranked = rank_moves(gs, 12, search_depth=4)  # selective: depth-2 prune -> depth-4
+    assert len(ranked) == 12
+    assert all(m in gs.legal_moves() for m, _ in ranked)
 
 
 # --- reply parsing ----------------------------------------------------------
@@ -140,7 +215,7 @@ def test_returns_a_legal_move():
     def fake_complete(system, messages):
         return f"Taking the central tiles.\nMOVE: {legal_code}"
 
-    move = LLMAgent(complete=fake_complete).choose_move(gs)
+    move = LLMAgent(complete=fake_complete, search_depth=1).choose_move(gs)
     assert move in gs.legal_moves()
     assert move == gs.legal_moves()[0]
 
@@ -155,7 +230,7 @@ def test_system_prompt_and_state_reach_the_model():
         seen["user"] = messages[0]["content"]
         return f"MOVE: {legal_code}"
 
-    LLMAgent(complete=fake_complete).choose_move(gs)
+    LLMAgent(complete=fake_complete, search_depth=1).choose_move(gs)
     assert "Azul" in seen["system"]
     assert "CANDIDATE MOVES" in seen["user"]  # default hybrid mode (top_k)
     assert "YOUR BOARD" in seen["user"]
@@ -185,7 +260,7 @@ def test_retries_after_illegal_move_then_succeeds():
             return "MOVE: 9z9"  # syntactically parseable but not legal
         return f"MOVE: {legal_code}"
 
-    agent = LLMAgent(complete=fake_complete)
+    agent = LLMAgent(complete=fake_complete, search_depth=1)
     move = agent.choose_move(gs)
     assert calls["n"] == 2
     assert move == gs.legal_moves()[0]
@@ -203,7 +278,7 @@ def test_corrective_message_is_appended_on_retry():
             return "no idea"
         return f"MOVE: {legal_code}"
 
-    LLMAgent(complete=fake_complete).choose_move(gs)
+    LLMAgent(complete=fake_complete, search_depth=1).choose_move(gs)
     # First call sees 1 message; after a bad reply, assistant + corrective user
     # are appended, so the retry sees 3.
     assert lengths == [1, 3]
@@ -228,6 +303,7 @@ def test_falls_back_when_model_never_yields_a_legal_move():
         complete=fake_complete,
         max_move_retries=1,
         fallback=_StubAgent(fallback_move),
+        search_depth=1,
     )
     move = agent.choose_move(gs)
     assert agent.used_fallback is True
@@ -241,7 +317,7 @@ def test_falls_back_when_completion_raises():
     def boom(system, messages):
         raise RuntimeError("network down")
 
-    agent = LLMAgent(complete=boom, fallback=_StubAgent(fallback_move))
+    agent = LLMAgent(complete=boom, fallback=_StubAgent(fallback_move), search_depth=1)
     move = agent.choose_move(gs)
     assert agent.used_fallback is True
     assert move == fallback_move
@@ -253,7 +329,7 @@ def test_default_fallback_is_greedy_and_plays_legally():
     def fake_complete(system, messages):
         return "nope"
 
-    agent = LLMAgent(complete=fake_complete, max_move_retries=0)
+    agent = LLMAgent(complete=fake_complete, max_move_retries=0, search_depth=1)
     move = agent.choose_move(gs)
     assert move in gs.legal_moves()
     assert agent.used_fallback is True

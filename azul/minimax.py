@@ -24,9 +24,13 @@ INF = float("inf")
 
 
 class MinimaxAgent(Agent):
-    def __init__(self, depth: int = 2, use_tt: bool = True):
+    def __init__(self, depth: int = 2, use_tt: bool = True, leaf_eval=None):
         self.depth = depth
         self.use_tt = use_tt
+        # Pluggable leaf evaluator (state, player) -> float; defaults to the
+        # within-round evaluate(). Pass bonus_aware_evaluate to extend the
+        # search's horizon to end-game bonuses (used for LLM candidate ranking).
+        self.leaf_eval = leaf_eval if leaf_eval is not None else evaluate
         self.nodes = 0   # populated each choose_move, for measurement
 
     def choose_move(self, state: GameState) -> Move:
@@ -45,10 +49,32 @@ class MinimaxAgent(Agent):
             alpha = max(alpha, best_value)
         return best_move
 
+    def move_values(self, state: GameState,
+                    moves: list[Move] | None = None) -> list[tuple[Move, float]]:
+        """Root moves with their depth-limited minimax value (from the mover's
+        perspective), best-first. Same search as choose_move, but each root move
+        gets a FULL window (no rising alpha across the root) so all values are
+        exact and comparable for ranking. If `moves` is given, only those root
+        moves are searched — used for selective deepening (a cheap shallow pass
+        prunes the root, then the survivors are re-searched deep)."""
+        self.nodes = 0
+        me = state.current_player
+        tt: dict | None = {} if self.use_tt else None
+        children = self._children(state, me, maximizing=True)
+        if moves is not None:
+            keep = set(moves)
+            children = [(m, c) for m, c in children if m in keep]
+        out = []
+        for move, child in children:
+            value = self._search(child, self.depth - 1, -INF, INF, me, tt)
+            out.append((move, value))
+        out.sort(key=lambda mv: mv[1], reverse=True)
+        return out
+
     # ------------------------------------------------------------------
 
     def _leaf_value(self, state: GameState, me: int) -> float:
-        return evaluate(state, me) - evaluate(state, 1 - me)
+        return self.leaf_eval(state, me) - self.leaf_eval(state, 1 - me)
 
     def _children(self, state: GameState, me: int, maximizing: bool):
         """All (move, resulting_state) pairs, ordered best-first for the side
