@@ -120,7 +120,7 @@ def eval_vs(opponent: str, n_games: int, model: str, effort: str,
     def run_game(i):
         llm = LLMAgent(model=model, effort=effort, top_k=TOP_K,
                        search_depth=SEARCH_DEPTH, bonus_aware=BONUS_AWARE,
-                       verbose=verbose)
+                       mcts_iterations=RANK_MCTS, verbose=verbose)
         opp = make_opponent(opponent, seed=1000 + i)
         llm_seat = i % 2  # alternate seats (by absolute game index)
         result, fb = play_one_game(
@@ -168,6 +168,10 @@ def main(argv=None) -> None:
     parser.add_argument("--no-bonus-aware", action="store_true",
                         help="disable the end-game-bonus-aware leaf eval in the "
                         "ranking search (on by default).")
+    parser.add_argument("--rank-mcts-iters", type=int, default=750,
+                        help="rank the LLM's candidates by MCTS visit counts at "
+                        "this iteration budget (default 750, the agent default; "
+                        "beats strong MCTS). 0 = off (fall back to minimax).")
     parser.add_argument("--start", type=int, default=0,
                         help="first game index (offsets seeds + seat alternation "
                         "so batches cover distinct games)")
@@ -182,11 +186,12 @@ def main(argv=None) -> None:
     from azul.envfile import load_env
     load_env()  # pick up ANTHROPIC_API_KEY from a local .env
 
-    global MCTS_ITERATIONS, TOP_K, SEARCH_DEPTH, BONUS_AWARE
+    global MCTS_ITERATIONS, TOP_K, SEARCH_DEPTH, BONUS_AWARE, RANK_MCTS
     MCTS_ITERATIONS = args.mcts_iterations
     TOP_K = args.top_k if args.top_k > 0 else None  # 0 -> show all moves
     SEARCH_DEPTH = args.search_depth if args.search_depth >= 2 else None
     BONUS_AWARE = not args.no_bonus_aware
+    RANK_MCTS = args.rank_mcts_iters if args.rank_mcts_iters > 0 else None
 
     opponents = ["greedy", "mcts"] if args.opponent == "both" else [args.opponent]
     for opp in opponents:
