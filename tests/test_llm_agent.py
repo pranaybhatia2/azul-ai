@@ -162,11 +162,27 @@ def test_search_depth_is_default_three():
     assert LLMAgent(complete=lambda s, m: "x").search_depth == 3
 
 
+def test_mcts_ranking_is_the_default():
+    # MCTS-ranking (beats strong MCTS) is the default ranker; it overrides
+    # search_depth unless disabled with mcts_iterations=0/None.
+    assert LLMAgent(complete=lambda s, m: "x").mcts_iterations == 750
+
+
 def test_selective_deepening_depth4_returns_legal_topk():
     gs = GameState.new_game(42)
     ranked = rank_moves(gs, 12, search_depth=4)  # selective: depth-2 prune -> depth-4
     assert len(ranked) == 12
     assert all(m in gs.legal_moves() for m, _ in ranked)
+
+
+def test_mcts_ranking_returns_legal_topk_by_visits():
+    import random
+    gs = GameState.new_game(42)
+    ranked = rank_moves(gs, 12, mcts_iterations=60, rng=random.Random(0))
+    assert len(ranked) == 12
+    assert all(m in gs.legal_moves() for m, _ in ranked)
+    scores = [s for _, s in ranked]
+    assert scores == sorted(scores, reverse=True)  # by visit count, best-first
 
 
 # --- reply parsing ----------------------------------------------------------
@@ -215,7 +231,7 @@ def test_returns_a_legal_move():
     def fake_complete(system, messages):
         return f"Taking the central tiles.\nMOVE: {legal_code}"
 
-    move = LLMAgent(complete=fake_complete, search_depth=1).choose_move(gs)
+    move = LLMAgent(complete=fake_complete, search_depth=1, mcts_iterations=0).choose_move(gs)
     assert move in gs.legal_moves()
     assert move == gs.legal_moves()[0]
 
@@ -230,7 +246,7 @@ def test_system_prompt_and_state_reach_the_model():
         seen["user"] = messages[0]["content"]
         return f"MOVE: {legal_code}"
 
-    LLMAgent(complete=fake_complete, search_depth=1).choose_move(gs)
+    LLMAgent(complete=fake_complete, search_depth=1, mcts_iterations=0).choose_move(gs)
     assert "Azul" in seen["system"]
     assert "CANDIDATE MOVES" in seen["user"]  # default hybrid mode (top_k)
     assert "YOUR BOARD" in seen["user"]
@@ -260,7 +276,7 @@ def test_retries_after_illegal_move_then_succeeds():
             return "MOVE: 9z9"  # syntactically parseable but not legal
         return f"MOVE: {legal_code}"
 
-    agent = LLMAgent(complete=fake_complete, search_depth=1)
+    agent = LLMAgent(complete=fake_complete, search_depth=1, mcts_iterations=0)
     move = agent.choose_move(gs)
     assert calls["n"] == 2
     assert move == gs.legal_moves()[0]
@@ -278,7 +294,7 @@ def test_corrective_message_is_appended_on_retry():
             return "no idea"
         return f"MOVE: {legal_code}"
 
-    LLMAgent(complete=fake_complete, search_depth=1).choose_move(gs)
+    LLMAgent(complete=fake_complete, search_depth=1, mcts_iterations=0).choose_move(gs)
     # First call sees 1 message; after a bad reply, assistant + corrective user
     # are appended, so the retry sees 3.
     assert lengths == [1, 3]
@@ -304,6 +320,7 @@ def test_falls_back_when_model_never_yields_a_legal_move():
         max_move_retries=1,
         fallback=_StubAgent(fallback_move),
         search_depth=1,
+        mcts_iterations=0,
     )
     move = agent.choose_move(gs)
     assert agent.used_fallback is True
@@ -317,7 +334,7 @@ def test_falls_back_when_completion_raises():
     def boom(system, messages):
         raise RuntimeError("network down")
 
-    agent = LLMAgent(complete=boom, fallback=_StubAgent(fallback_move), search_depth=1)
+    agent = LLMAgent(complete=boom, fallback=_StubAgent(fallback_move), search_depth=1, mcts_iterations=0)
     move = agent.choose_move(gs)
     assert agent.used_fallback is True
     assert move == fallback_move
@@ -329,7 +346,7 @@ def test_default_fallback_is_greedy_and_plays_legally():
     def fake_complete(system, messages):
         return "nope"
 
-    agent = LLMAgent(complete=fake_complete, max_move_retries=0, search_depth=1)
+    agent = LLMAgent(complete=fake_complete, max_move_retries=0, search_depth=1, mcts_iterations=0)
     move = agent.choose_move(gs)
     assert move in gs.legal_moves()
     assert agent.used_fallback is True
