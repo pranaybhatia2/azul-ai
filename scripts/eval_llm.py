@@ -168,9 +168,10 @@ def main(argv=None) -> None:
     parser.add_argument("--no-bonus-aware", action="store_true",
                         help="disable the end-game-bonus-aware leaf eval in the "
                         "ranking search (on by default).")
-    parser.add_argument("--rank-mcts-iters", type=int, default=0,
+    parser.add_argument("--rank-mcts-iters", type=int, default=750,
                         help="rank the LLM's candidates by MCTS visit counts at "
-                        "this iteration budget instead of minimax (0 = off).")
+                        "this iteration budget (default 750, the agent default; "
+                        "beats strong MCTS). 0 = off (fall back to minimax).")
     parser.add_argument("--start", type=int, default=0,
                         help="first game index (offsets seeds + seat alternation "
                         "so batches cover distinct games)")

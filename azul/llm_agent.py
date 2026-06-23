@@ -477,7 +477,7 @@ class LLMAgent(Agent):
         opponent_aware: bool = True,
         search_depth: Optional[int] = 3,
         bonus_aware: bool = False,
-        mcts_iterations: Optional[int] = None,
+        mcts_iterations: Optional[int] = 750,
         client=None,
         complete: Optional[CompleteFn] = None,
         max_move_retries: int = 2,
@@ -501,9 +501,11 @@ class LLMAgent(Agent):
             (default False — tested 3-3 vs strong MCTS, no better than plain
             depth-3 and more erratic; kept for tuning). Only applies in minimax
             ranking.
-        mcts_iterations: if set, rank candidates by MCTS visit counts at this
-            iteration budget instead of minimax (the agent inherits MCTS search
-            + LLM judgment). Slower; overrides search_depth.
+        mcts_iterations: rank candidates by MCTS visit counts at this iteration
+            budget instead of minimax (default 750 — the agent inherits MCTS's
+            full-game search + LLM judgment; beats strong 600-iter MCTS ~83% at
+            ~1s/turn). Overrides search_depth. Set None/0 to fall back to the
+            (deterministic) minimax ranking.
         client: an anthropic.Anthropic instance; created lazily if omitted.
         complete: override the network call entirely — (system, messages) -> text.
             Used by tests so no API key or network is needed.
